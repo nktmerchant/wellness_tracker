@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   getStatus,
-  sendCode,
+  signIn,
   signOut,
   subscribeStatus,
   sync,
-  verifyCode,
   type SyncStatus,
 } from './sync';
 
@@ -112,16 +111,15 @@ function SignedIn({ status }: { status: SyncStatus }) {
 
 function SignIn() {
   const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function run(step: () => Promise<void>) {
+  async function submit() {
     setBusy(true);
     setError(null);
     try {
-      await step();
+      await signIn(email.trim(), password);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -129,62 +127,33 @@ function SignIn() {
     }
   }
 
-  if (!sent) {
-    return (
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void run(async () => {
-            await sendCode(email.trim());
-            setSent(true);
-          });
-        }}
-      >
-        <p>We'll email you a 6-digit code. No password needed.</p>
-        <input
-          type="email"
-          required
-          autoComplete="email"
-          placeholder="you@example.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-        {error && <p className="account-error">{error}</p>}
-        <div className="account-actions">
-          <button type="submit" disabled={busy}>
-            {busy ? 'Sending…' : 'Email me a code'}
-          </button>
-        </div>
-      </form>
-    );
-  }
-
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        void run(() => verifyCode(email.trim(), code.trim()));
+        void submit();
       }}
     >
-      <p>
-        Enter the code sent to <strong>{email}</strong>.
-      </p>
       <input
-        inputMode="numeric"
-        autoComplete="one-time-code"
-        pattern="[0-9]*"
+        type="email"
         required
-        placeholder="123456"
-        value={code}
-        onChange={(e) => setCode(e.target.value)}
+        autoComplete="username"
+        placeholder="you@example.com"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      <input
+        type="password"
+        required
+        autoComplete="current-password"
+        placeholder="Password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
       />
       {error && <p className="account-error">{error}</p>}
       <div className="account-actions">
         <button type="submit" disabled={busy}>
-          {busy ? 'Checking…' : 'Sign in'}
-        </button>
-        <button type="button" className="is-quiet" onClick={() => setSent(false)}>
-          Use a different email
+          {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </div>
     </form>

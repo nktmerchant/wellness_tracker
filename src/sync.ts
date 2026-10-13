@@ -167,20 +167,14 @@ function toRow(day: string, s: NonNullable<ReturnType<typeof readStored>>): Row 
   };
 }
 
-/* ---- sign-in: emailed one-time code ---- */
+/* ---- sign-in: email and password ---- */
 
 /*
- * A code typed into the app rather than a magic link: on iOS a link opens in
- * Safari, which has separate storage from the home-screen app, so the
- * installed app would never see the session.
+ * No sign-up here: the one account is created in the Supabase dashboard and
+ * new sign-ups are turned off, so nothing in the app can create users.
  */
-export async function sendCode(email: string): Promise<void> {
-  const { error } = await supabase!.auth.signInWithOtp({ email });
-  if (error) throw error;
-}
-
-export async function verifyCode(email: string, token: string): Promise<void> {
-  const { error } = await supabase!.auth.verifyOtp({ email, token, type: 'email' });
+export async function signIn(email: string, password: string): Promise<void> {
+  const { error } = await supabase!.auth.signInWithPassword({ email, password });
   if (error) throw error;
 }
 
