@@ -1,0 +1,706 @@
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --outline: #000000;
+  --blank: #ffffff;
+  /* The dial before it has been logged: a value shown, but not committed. */
+  --unset: #b6bec9;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Reveal timings. The core's own scale is deliberately slower than these. */
+  --pop-fade: 130ms;
+  --pop-grow: 190ms;
+  --pop-stagger: 26ms;
+  --meter-in: 200ms;
+  --meter-fill: 400ms;
+  --pill-in: 200ms;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--bg);
+  font: 400 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /*
+    An explicit 1fr track plus align-content (rather than place-items) keeps
+    the column definite, so percentage widths inside it have something real to
+    resolve against. With an auto track the chain is circular and the SVG
+    collapses to its 300px intrinsic default.
+  */
+  display: grid;
+  grid-template-columns: 1fr;
+  align-content: center;
+  /* Installed on iPhone the page runs edge to edge (viewport-fit=cover), so
+     keep clear of the notch and the home indicator. */
+  padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+}
+
+/* Vite's mount point sits between body and the stage; without a width here
+   the percentage chain breaks before it reaches the SVG. */
+#root {
+  width: 100%;
+}
+
+/*
+  The figure is taller than it is wide, so height usually limits it: convert
+  the available height into a width via the viewBox ratio and cap on that, with
+  no arbitrary pixel maximum. --zoom multiplies both terms, so the figure
+  scales identically whether height or width is the binding constraint.
+*/
+.stage {
+  width: calc(100% * var(--zoom));
+  margin-inline: auto;
+  max-width: calc((100dvh - 48px) * var(--ratio) * var(--zoom));
+}
+
+/* The viewBox does the scaling, so the pane just needs an aspect ratio. */
+.pane {
+  width: 100%;
+  aspect-ratio: var(--ratio);
+  display: block;
+  overflow: visible;
+}
+
+/* ---- node ---- */
+
+/*
+  One selector for "this node is revealed". :focus-within covers tabbing into
+  a satellite or the dial; .is-open is set from React while the dial is being
+  dragged, so the group cannot collapse mid-drag.
+*/
+.node { cursor: pointer; }
+.node:focus,
+.node :focus { outline: none; }
+
+/* Cel-shaded: flat fill, hard black line, no shading anywhere. */
+.core,
+.capsule,
+.meter-knob {
+  stroke: var(--outline);
+  stroke-linejoin: round;
+}
+
+.core { fill: var(--color); }
+
+.core-group {
+  transform-box: view-box;
+  transform-origin: calc(var(--cx) * 1px) calc(var(--cy) * 1px);
+  transition: transform 420ms var(--ease);
+}
+
+.node:is(:hover, :focus-within, .is-open) .core-group {
+  transform: scale(var(--hover-scale));
+}
+
+/* The category icon is knocked out white and given the same cel outline.
+   --icon-stroke is the figure's outline weight expressed in this icon's own
+   grid units, so it matches whatever set the icon came from. */
+.core-icon {
+  color: var(--blank);
+  pointer-events: none;
+}
+
+.core-icon path {
+  stroke: var(--outline);
+  stroke-width: var(--icon-stroke);
+  paint-order: stroke;
+}
+
+/* ---- satellites ---- */
+
+/*
+  Hidden satellites collapse toward their own centers. transform-origin is
+  given in user units because fill-box on a <g> is less predictable, and
+  because the circles already sit at their final coordinates the reveal
+  involves no layout — only opacity and transform, both compositor-only.
+*/
+/*
+  At rest the satellites are small plain dots — a preview of what the node
+  holds, so the day's state is readable without hovering, and paging between
+  days visibly changes the figure. Hovering grows these same shapes.
+*/
+.satellite {
+  transform-box: view-box;
+  transform-origin: calc(var(--cx) * 1px) calc(var(--cy) * 1px);
+  /* Pulled in toward the core as well as shrunk. The hover state lists the
+     same functions so the two interpolate rather than snapping. */
+  transform: translate(var(--pull-x), var(--pull-y)) scale(var(--preview-scale));
+  transition: transform var(--pop-grow) var(--ease);
+  transition-delay: calc(var(--i) * 20ms);
+  /* Previews are display-only: too small to be comfortable tap targets. */
+  pointer-events: none;
+}
+
+.node:is(:hover, :focus-within, .is-open) .satellite {
+  transform: translate(0, 0) scale(1);
+  pointer-events: auto;
+  /* Stagger outward from the axis, so the group unfurls rather than blinking. */
+  transition-delay: calc(var(--i) * var(--pop-stagger) + 20ms);
+}
+
+/*
+  The capsule is the satellite — one rect that is a circle when closed. Width
+  is the only thing that animates, which is why it reads as the circle itself
+  stretching rather than a separate plaque appearing behind it. Transitioning
+  a geometry property costs a re-raster per frame, which is affordable for the
+  single shape under the pointer.
+*/
+.capsule {
+  fill: var(--blank);
+  width: calc(var(--w-closed) * 1px);
+  transition: width var(--pill-in) var(--ease);
+}
+
+/* Unlogged reads as an empty outline; logged fills with the node's colour. */
+.satellite.is-on .capsule { fill: var(--color); }
+
+/*
+  Capsules are always built growing rightward, then mirrored for the ones that
+  belong on the left. Mirroring the shape rather than animating x alongside
+  width keeps a single animating property, so the two can never desync. The
+  text and icon sit outside this element so they are never flipped.
+*/
+.satellite.is-left .capsule {
+  transform-box: view-box;
+  transform-origin: calc(var(--cx) * 1px) calc(var(--cy) * 1px);
+  transform: scaleX(-1);
+}
+
+/* Expanded only while hovered or focused from the keyboard. */
+.satellite:is(:hover, :focus-visible) .capsule {
+  width: calc(var(--w-open) * 1px);
+}
+
+.satellite:focus-visible .capsule { stroke-width: 14px; }
+
+/* Previews carry no icons — only fill state. */
+.satellite-icon {
+  color: var(--outline);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    color var(--pop-fade) var(--ease),
+    opacity var(--pop-fade) var(--ease);
+}
+
+.node:is(:hover, :focus-within, .is-open) .satellite-icon { opacity: 1; }
+
+.satellite.is-on .satellite-icon { color: var(--blank); }
+
+/* ---- labels ---- */
+
+/* Faded in rather than scaled, because scaling a <text> stretches glyphs. */
+.pill-label {
+  fill: var(--outline);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 110ms var(--ease);
+}
+
+.satellite.is-on .pill-label { fill: var(--blank); }
+
+.satellite:is(:hover, :focus-visible) .pill-label {
+  opacity: 1;
+  transition-delay: 90ms;
+}
+
+/* ---- sleep dial ---- */
+
+.meter path {
+  fill: none;
+  stroke-linecap: round;
+}
+
+/*
+  At rest the dial is scaled about the node's centre down to ARC_PREVIEW_R, so
+  it sits close to the core. The preview stroke widths are pre-divided by the
+  same factor, so the bar's thickness is set independently of its radius.
+*/
+.meter {
+  transform-box: view-box;
+  transform-origin: calc(var(--cx) * 1px) calc(var(--cy) * 1px);
+  transform: scale(var(--preview-k));
+  transition: transform var(--meter-in) var(--ease);
+  cursor: grab;
+  /* A preview must not be draggable, or a stray click would log a value. */
+  pointer-events: none;
+}
+
+.node:is(:hover, :focus-within, .is-open) .meter {
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.meter-rim { stroke-width: var(--rim-sm); }
+.meter-channel,
+.meter-fill { stroke-width: var(--chan-sm); }
+
+.node:is(:hover, :focus-within, .is-open) .meter-rim { stroke-width: var(--rim-w); }
+.node:is(:hover, :focus-within, .is-open) :is(.meter-channel, .meter-fill) {
+  stroke-width: var(--chan-w);
+}
+
+.meter-rim,
+.meter-channel,
+.meter-fill {
+  transition: stroke-width var(--meter-in) var(--ease);
+}
+
+/* The knob and the hour scale belong to the full dial, not the preview. */
+.meter-knob,
+.dial-tick {
+  opacity: 0;
+  transition: opacity var(--pop-fade) var(--ease);
+}
+
+.node:is(:hover, :focus-within, .is-open) :is(.meter-knob, .dial-tick) { opacity: 1; }
+
+.node.is-dragging .meter { cursor: grabbing; }
+
+/* The rim is drawn wider than the channel, so its overhang is the outline. */
+.meter-rim { stroke: var(--outline); }
+.meter-channel { stroke: var(--blank); }
+.meter-fill { stroke: var(--color); }
+/* The end cap keeps the fill's colour and takes the usual black outline. */
+.meter-knob { fill: var(--color); }
+
+/* Not logged yet: the same bar and cap, drained of colour. */
+.meter.is-unset .meter-fill { stroke: var(--unset); }
+.meter.is-unset .meter-knob { fill: var(--unset); }
+
+.dial-tick {
+  fill: var(--outline);
+  font-size: 34px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+/*
+  Progress is driven by stroke-dashoffset against pathLength="100", so
+  --dash-end is literally "100 minus percent filled". dashoffset interpolates
+  reliably, which a dasharray transition does not.
+*/
+/*
+  The preview has to show the logged length, so the fill sits at its real
+  value at rest rather than animating up from empty on hover.
+*/
+.meter-fill {
+  stroke-dasharray: 100 100;
+  stroke-dashoffset: var(--dash-end);
+  transition:
+    stroke-dashoffset var(--meter-fill) var(--ease),
+    stroke-width var(--meter-in) var(--ease);
+}
+
+/* While dragging, the fill must track the pointer, not ease toward it. */
+.node.is-dragging .meter-fill { transition: none; }
+
+/* Focus is dropped on pointer release, but it is held during the drag
+   itself — so don't paint a focus ring mid-drag. */
+.node:not(.is-dragging) .meter:focus-visible .meter-knob { stroke-width: 14px; }
+
+/* ---- day navigation ---- */
+
+.day-arrow { cursor: pointer; }
+.day-arrow:focus,
+.day-arrow :focus { outline: none; }
+
+/*
+  Two strokes meeting at a point: no fill, no stem. Grey at rest, black on
+  hover, and that colour change is the whole affordance — nothing resizes.
+*/
+.day-arrow-mark {
+  fill: none;
+  stroke: var(--unset);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 120ms var(--ease);
+}
+
+.day-arrow:not(.is-disabled):is(:hover, :focus-visible) .day-arrow-mark {
+  stroke: var(--outline);
+}
+
+/*
+  Past either end of the range the arrow is still drawn in place, so the
+  controls never shift — it simply stays grey when hovered and does nothing.
+  Hover is left live so the cursor can say it is not clickable.
+*/
+.day-arrow.is-disabled { cursor: default; }
+
+.day-label-button { cursor: pointer; }
+.day-label-button:focus,
+.day-label-button :focus { outline: none; }
+
+.day-label {
+  fill: var(--outline);
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  transition: fill 120ms var(--ease);
+}
+
+.day-label-button:is(:hover, :focus-visible) .day-label {
+  text-decoration: underline;
+  text-decoration-thickness: 4px;
+  text-underline-offset: 8px;
+}
+
+/* ---- a11y ---- */
+
+/* The outline is already black, so focus reads as a heavier line. */
+.node:focus-visible .core { stroke-width: 18px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .core-group,
+  .satellite,
+  .satellite-icon,
+  .capsule,
+  .pill-label,
+  .meter-rim,
+  .meter-channel,
+  .meter-fill,
+  .meter-knob,
+  .dial-tick,
+  .day-arrow-mark {
+    transition-duration: 1ms;
+    transition-delay: 0ms;
+  }
+}
+
+/* ---- trends modal ---- */
+
+/*
+  Chart marks reuse the figure's language: flat fills, hard black outlines,
+  hollow for absent. Each strip is a single series named by its own heading,
+  so identity never rests on colour alone — which matters here because red
+  and green are close under deuteranopia.
+*/
+.trends {
+  border: 5px solid var(--outline);
+  border-radius: 22px;
+  padding: 0;
+  width: min(1120px, calc(100vw - 48px));
+  max-height: calc(100dvh - 64px);
+  background: var(--bg);
+  color: var(--outline);
+  overflow: hidden;
+}
+
+/*
+  Scoped to [open] on purpose: the UA sheet hides a closed dialog with
+  `dialog:not([open]) { display: none }`, and an unscoped author `display`
+  would beat it and leave the modal on screen while shut.
+
+  The column is what makes the body scrollable — with max-height on the
+  dialog but no bound on the body, the body simply overflows and the parent's
+  `overflow: hidden` clips it, so the bottom axis is cut off with nothing to
+  scroll. min-height:0 lets the flex child shrink below its content.
+*/
+.trends[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.trends-head { flex: none; }
+
+.trends-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.trends::backdrop {
+  background: rgb(0 0 0 / 0.45);
+}
+
+.trends-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px 10px 24px;
+  border-bottom: 3px solid var(--outline);
+}
+
+/* Week stepper: same grey-to-black affordance as the figure's day arrows. */
+.week-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline: auto;
+}
+
+.week-label {
+  min-width: 13em;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.week-nav button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 999px;
+  color: var(--unset);
+  cursor: pointer;
+  transition: color 120ms var(--ease);
+}
+
+.week-nav button:not(:disabled):is(:hover, :focus-visible) { color: var(--outline); }
+
+/* At the ends of the range: stays grey, and genuinely not clickable. */
+.week-nav button:disabled { cursor: default; }
+
+.nav-chevron {
+  width: 22px;
+  height: 22px;
+}
+
+.nav-chevron path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.trends-close {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  font-size: 23px;
+  line-height: 1;
+  background: var(--blank);
+  color: var(--outline);
+  border: 3px solid var(--outline);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.trends-close:is(:hover, :focus-visible) {
+  background: var(--outline);
+  color: var(--blank);
+}
+
+.trends-body {
+  /* Sized to fit at normal heights; scrolls rather than clips when it cannot. */
+  overflow: auto;
+  padding: 4px 24px 14px;
+}
+
+/* Light rules between lanes; the axis below is not a lane, so it gets none. */
+.lane + .lane {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e7eaef;
+}
+
+/*
+  Scaled to the modal's width rather than laid out in fixed pixels, so three
+  lanes plus the axis always fit without scrolling. Left-aligned, with each
+  lane's title inside its own SVG so it shares the row labels' right edge.
+*/
+.chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-inline: 0;
+}
+
+.lane-title {
+  fill: var(--outline);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* Logged: filled in the node's colour. Absent: hollow, so a gap is a mark. */
+.cell {
+  stroke: var(--outline);
+  stroke-width: 2.5px;
+}
+
+.cell.is-on { fill: var(--color); }
+.cell.is-off { fill: var(--blank); }
+
+/*
+  A day inside this week that has not happened yet. Distinct from is-off,
+  which means the day passed with nothing logged — drawing them the same way
+  would read as days you skipped.
+*/
+.cell.is-future {
+  fill: var(--blank);
+  stroke: #e2e6ec;
+}
+
+.cell-icon {
+  color: var(--blank);
+  pointer-events: none;
+}
+
+.row-label {
+  fill: #5d6775;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Recessive: present enough to read values against, quiet enough to ignore. */
+.grid {
+  stroke: #dfe3e9;
+  stroke-width: 2px;
+}
+
+.line {
+  fill: none;
+  stroke: var(--color);
+  stroke-width: 5px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.point {
+  fill: var(--color);
+  stroke: var(--outline);
+  stroke-width: 3px;
+}
+
+.axis-dow {
+  fill: var(--outline);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.axis-day {
+  fill: #5d6775;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Days still to come are labelled, but recede. */
+.axis .is-future .axis-dow,
+.axis .is-future .axis-day { fill: #c2c9d3; }
+
+@media (prefers-reduced-motion: reduce) {
+  .day-label,
+  .trends-close {
+    transition-duration: 1ms;
+  }
+}
+
+/* ---- account and sync ---- */
+
+/* Quiet corner chip: grey until hovered, like the figure's other controls. */
+.account-chip {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--unset);
+  background: var(--bg);
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 120ms var(--ease);
+}
+
+.account-chip:is(:hover, :focus-visible) { color: var(--outline); }
+
+.account-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+/* Only states that need attention take colour; idle stays recessive. */
+.account-chip.is-error .account-dot { background: #e03131; }
+.account-chip.is-offline .account-dot,
+.account-chip.is-syncing .account-dot { background: #f08c00; }
+.account-chip.is-idle .account-dot { background: #2f9e44; }
+
+.account {
+  border: 5px solid var(--outline);
+  border-radius: 22px;
+  padding: 0;
+  width: min(420px, calc(100vw - 32px));
+  background: var(--bg);
+  color: var(--outline);
+}
+
+.account::backdrop { background: rgb(0 0 0 / 0.45); }
+
+.account-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 10px 24px;
+  border-bottom: 3px solid var(--outline);
+}
+
+.account-head h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.account-body {
+  padding: 6px 24px 20px;
+  font-size: 15px;
+}
+
+.account-body input {
+  width: 100%;
+  padding: 10px 12px;
+  /* 16px stops iOS Safari zooming the page when the field takes focus. */
+  font: inherit;
+  font-size: 16px;
+  border: 3px solid var(--outline);
+  border-radius: 12px;
+}
+
+.account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.account-actions button {
+  padding: 9px 16px;
+  font: inherit;
+  font-weight: 700;
+  color: var(--blank);
+  background: var(--outline);
+  border: 3px solid var(--outline);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.account-actions button.is-quiet {
+  color: var(--outline);
+  background: var(--blank);
+}
+
+.account-actions button:disabled { opacity: 0.5; cursor: default; }
+
+.account-status { font-weight: 700; }
+.account-error { color: #e03131; font-weight: 400; }
+.account-note { color: #555; font-size: 13px; margin-bottom: 0; }
