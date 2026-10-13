@@ -5,11 +5,14 @@
  * Edits show on screen immediately and are saved after a short pause, so a
  * dial drag is one request rather than one per step. A day with an unsaved
  * edit is never overwritten by a reload, so a slow save can't be undone by a
- * refresh that raced it. The app needs the network: there is no copy on the
+ * refresh that raced it. While the app is open, a Realtime subscription
+ * brings in edits from the user's other devices as they're saved; reloading
+ * on return to the foreground covers anything missed while the connection
+ * was down. The app needs the network: there is no copy on the
  * device, and a failed save is shown and retried, not queued for later.
  */
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { applyServer, clearDays, onEdit, readDay } from './store';
+import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
+import { applyServer, applyServerDay, clearDays, onEdit, readDay } from './store';
 import type { DayLog } from './useDayLog';
 
 const URL = import.meta.env.VITE_SUPABASE_URL;
@@ -168,6 +171,44 @@ export async function save(): Promise<void> {
   }
 }
 
+/* ---- live updates ---- */
+
+let channel: RealtimeChannel | null = null;
+
+/**
+ * Every saved change to this user's rows, from any device — including this
+ * one's own saves, which come back with the values already on screen. A day
+ * with an unsaved edit here keeps the edit; it will be saved over the top.
+ */
+function listen(uid: string): void {
+  channel = supabase!
+    .channel(`day_logs:${uid}`)
+    .on<Row>(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'day_logs', filter: `user_id=eq.${uid}` },
+      (payload) => {
+        if (uid !== userId || payload.eventType === 'DELETE') return;
+        const row = payload.new;
+        if (pending.has(row.day)) return;
+        applyServerDay(row.day, {
+          activities: row.activities,
+          meals: row.meals,
+          sleepHours: row.sleep_hours,
+        });
+      },
+    )
+    .subscribe((state) => {
+      /* A rejoin after a dropped connection may have missed changes. The
+         first join doesn't need this: the initial load is already running. */
+      if (state === 'SUBSCRIBED' && status.load === 'ready') void load();
+    });
+}
+
+function unsubscribe(): void {
+  if (channel) void supabase!.removeChannel(channel);
+  channel = null;
+}
+
 /* ---- sign-in: email and password ---- */
 
 /*
@@ -200,6 +241,7 @@ export function startSync(): void {
     const uid = session?.user.id ?? null;
     if (uid === userId && status.auth !== 'checking') return;
     userId = uid;
+    unsubscribe();
     clearTimeout(saveTimer);
     pending.clear();
     clearDays();
@@ -212,7 +254,13 @@ export function startSync(): void {
       saveError: null,
       pending: 0,
     });
-    if (uid) setTimeout(() => void load(), 0);
+    if (uid) {
+      setTimeout(() => {
+        if (uid !== userId) return;
+        void load();
+        listen(uid);
+      }, 0);
+    }
   });
 
   onEdit(queueSave);

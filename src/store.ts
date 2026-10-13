@@ -39,6 +39,12 @@ export function applyServer(rows: Map<string, DayLog>, keep: Set<string>): void 
   emit();
 }
 
+/** One day pushed from the server, e.g. another device's edit. */
+export function applyServerDay(date: string, log: DayLog): void {
+  days.set(date, log);
+  emit();
+}
+
 export function clearDays(): void {
   days.clear();
   emit();

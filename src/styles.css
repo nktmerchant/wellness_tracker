@@ -602,42 +602,79 @@ body {
 
 /* ---- account and sync ---- */
 
-/* Quiet corner chip: grey until hovered, like the figure's other controls. */
-.account-chip {
+/* Shown only while a save is failing; saving itself is silent. */
+.save-notice {
   position: fixed;
   top: max(12px, env(safe-area-inset-top));
   right: max(12px, env(safe-area-inset-right));
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 12px;
-  font: inherit;
+  gap: 8px;
+  padding: 5px 6px 5px 12px;
   font-size: 13px;
   font-weight: 700;
-  color: var(--unset);
+  color: var(--outline);
   background: var(--bg);
   border: 2px solid currentColor;
   border-radius: 999px;
-  cursor: pointer;
-  transition: color 120ms var(--ease);
 }
 
-.account-chip:is(:hover, :focus-visible) { color: var(--outline); }
-
-.account-dot {
+.save-dot {
   width: 9px;
   height: 9px;
   border-radius: 999px;
-  background: currentColor;
+  background: #e03131;
 }
 
-/* Only states that need attention take colour; saved stays recessive. */
-.account-chip.is-error .account-dot { background: #e03131; }
-.account-chip.is-saving .account-dot { background: #f08c00; }
-.account-chip.is-saved .account-dot { background: #2f9e44; }
+.save-notice button {
+  padding: 3px 10px;
+  font: inherit;
+  color: var(--blank);
+  background: var(--outline);
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+}
 
 /* Sign-in, loading and connection errors: the account card, alone on the page. */
 .gate .account {
+  width: 100%;
+  max-width: 420px;
+  margin-inline: auto;
+}
+
+/* Who's signed in, under the trends lanes. Quiet, like the axis labels. */
+.trends-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 24px;
+  border-top: 3px solid var(--outline);
+  font-size: 13px;
+  color: #555;
+}
+
+.trends-foot strong { color: var(--outline); }
+
+.trends-foot button {
+  padding: 5px 12px;
+  font: inherit;
+  font-weight: 700;
+  color: var(--outline);
+  background: var(--blank);
+  border: 2px solid var(--outline);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.trends-foot button:is(:hover, :focus-visible) {
+  color: var(--blank);
+  background: var(--outline);
+}
+
+.account {
   width: 100%;
   max-width: 420px;
   margin-inline: auto;
@@ -652,7 +689,6 @@ body {
   color: var(--outline);
 }
 
-.account::backdrop { background: rgb(0 0 0 / 0.45); }
 
 .account-head {
   display: flex;
@@ -711,4 +747,3 @@ body {
 
 .account-status { font-weight: 700; }
 .account-error { color: #e03131; font-weight: 400; }
-.account-note { color: #555; font-size: 13px; margin-bottom: 0; }

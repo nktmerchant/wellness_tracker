@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { AccountLine } from './Account';
 import Icon from './Icon';
 import { NODES, type NodeSpec, type Slot } from './geometry';
 import {
@@ -177,6 +178,7 @@ export default function TrendsModal({
         <SleepLane node={sleep} days={days} r={R} />
         <Axis days={days} />
       </div>
+      <AccountLine />
     </dialog>
   );
 }

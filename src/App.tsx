@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore } from 'react';
-import Account, { LoadFailed, Loading, NotConfigured, SignIn } from './Account';
+import SaveNotice, { LoadFailed, Loading, NotConfigured, SignIn } from './Account';
 import { getStatus, subscribeStatus } from './sync';
 import TriangleNodes from './TriangleNodes';
 import TrendsModal from './TrendsModal';
@@ -57,7 +57,7 @@ function Tracker() {
         onWeekStart={setTrendsWeek}
         onClose={() => setTrendsOpen(false)}
       />
-      <Account />
+      <SaveNotice />
     </main>
   );
 }

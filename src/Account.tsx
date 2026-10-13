@@ -1,90 +1,46 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { getStatus, load, save, signIn, signOut, subscribeStatus, type Status } from './sync';
+import { useState, useSyncExternalStore } from 'react';
+import { getStatus, load, save, signIn, signOut, subscribeStatus } from './sync';
 
-function summary(s: Status): string {
-  if (s.save === 'error') return 'Not saved';
-  if (s.save === 'saving' || s.pending) return 'Saving…';
-  return 'Saved';
+/**
+ * Saving is silent; this corner notice appears only while a save is failing,
+ * so an edit that hasn't reached the server is never shown as if it had.
+ */
+export default function SaveNotice() {
+  const status = useSyncExternalStore(subscribeStatus, getStatus);
+  if (status.save !== 'error') return null;
+  return (
+    <div className="save-notice" role="alert">
+      <span className="save-dot" aria-hidden="true" />
+      <span title={status.saveError ?? undefined}>Not saved</span>
+      <button type="button" onClick={() => void save()}>
+        Try again
+      </button>
+    </div>
+  );
 }
 
-/** The corner control: save state, and the way to sign out. */
-export default function Account() {
+/** Who's signed in, and the way out — at the foot of the trends view. */
+export function AccountLine() {
   const status = useSyncExternalStore(subscribeStatus, getStatus);
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDialogElement>(null);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (open && !el.open) el.showModal();
-    if (!open && el.open) el.close();
-  }, [open]);
-
-  const state = status.save === 'error' ? 'error' : status.pending ? 'saving' : 'saved';
-
   return (
-    <>
+    <div className="trends-foot">
+      <span>
+        Signed in as <strong>{status.email}</strong>
+      </span>
       <button
         type="button"
-        className={`account-chip is-${state}`}
-        onClick={() => setOpen(true)}
-      >
-        <span className="account-dot" aria-hidden="true" />
-        {summary(status)}
-      </button>
-
-      <dialog
-        ref={ref}
-        className="account"
-        aria-label="Account"
-        onClose={() => setOpen(false)}
-        onClick={(e) => {
-          if (e.target === ref.current) setOpen(false);
+        onClick={() => {
+          if (
+            status.pending &&
+            !confirm('Some changes haven’t been saved yet and will be lost. Sign out anyway?')
+          )
+            return;
+          void signOut();
         }}
       >
-        <div className="account-head">
-          <h2>Account</h2>
-          <button
-            type="button"
-            className="trends-close"
-            onClick={() => setOpen(false)}
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
-        <div className="account-body">
-          <p>
-            Signed in as <strong>{status.email}</strong>
-          </p>
-          <p className="account-status">
-            {summary(status)}
-            {status.saveError && <span className="account-error"> — {status.saveError}</span>}
-          </p>
-          <div className="account-actions">
-            {status.save === 'error' && (
-              <button type="button" onClick={() => void save()}>
-                Try again
-              </button>
-            )}
-            <button
-              type="button"
-              className="is-quiet"
-              onClick={() => {
-                if (
-                  status.pending &&
-                  !confirm('Some changes haven’t been saved yet and will be lost. Sign out anyway?')
-                )
-                  return;
-                void signOut();
-              }}
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
-      </dialog>
-    </>
+        Sign out
+      </button>
+    </div>
   );
 }
 
