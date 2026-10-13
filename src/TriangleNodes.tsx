@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react';
 import {
-  ARROWS,
   ARROW_HALF_H,
   ARROW_HALF_W,
   ARROW_HIT_PAD,
@@ -20,14 +19,12 @@ import {
   PILL_H,
   capsuleRect,
   chevron,
-  DATE_POS,
   SAT_HIT_PAD,
   SAT_ORBIT,
   SAT_PREVIEW_ORBIT,
   SAT_PREVIEW_SCALE,
   SAT_R,
   STROKE,
-  VIEW,
   angleToValue,
   arcPath,
   dialArc,
@@ -42,6 +39,7 @@ import {
   satelliteAngles,
   valueAngle,
   valueFraction,
+  type Frame,
   type NodeSpec,
   type Pt,
   type Reveal,
@@ -51,6 +49,7 @@ import Icon from './Icon';
 import { formatDay, type DayLog } from './useDayLog';
 
 type Props = {
+  frame: Frame;
   log: DayLog;
   date: string;
   canGoBack: boolean;
@@ -72,6 +71,7 @@ type Props = {
  * stylesheet owns colour and motion.
  */
 export default function TriangleNodes({
+  frame,
   log,
   date,
   canGoBack,
@@ -84,10 +84,13 @@ export default function TriangleNodes({
   return (
     <svg
       className="pane"
-      viewBox={`0 0 ${VIEW.w} ${VIEW.h}`}
+      viewBox={frame.viewBox}
       style={
         {
           '--stroke': `${STROKE}px`,
+          '--sat-k': frame.satK,
+          '--tick-font': `${frame.tickFont}px`,
+          '--date-font': `${frame.dateFont}px`,
           '--hover-scale': NODE_HOVER_SCALE,
           '--preview-scale': SAT_PREVIEW_SCALE,
         } as React.CSSProperties
@@ -115,8 +118,8 @@ export default function TriangleNodes({
         ),
       )}
 
-      <DayArrow dir={-1} enabled={canGoBack} onActivate={() => onGoDays(-1)} />
-      <DayArrow dir={1} enabled={canGoForward} onActivate={() => onGoDays(1)} />
+      <DayArrow arrows={frame.arrows} dir={-1} enabled={canGoBack} onActivate={() => onGoDays(-1)} />
+      <DayArrow arrows={frame.arrows} dir={1} enabled={canGoForward} onActivate={() => onGoDays(1)} />
 
       {/* The date doubles as the way into the trends view. */}
       <g
@@ -137,8 +140,8 @@ export default function TriangleNodes({
       >
         <text
           className="day-label"
-          x={DATE_POS.x}
-          y={DATE_POS.y}
+          x={frame.date.x}
+          y={frame.date.y}
           textAnchor="middle"
           dominantBaseline="central"
         >
@@ -154,15 +157,17 @@ export default function TriangleNodes({
  * so the controls do not move when you reach today or the first logged day.
  */
 function DayArrow({
+  arrows,
   dir,
   enabled,
   onActivate,
 }: {
+  arrows: Frame['arrows'];
   dir: 1 | -1;
   enabled: boolean;
   onActivate: () => void;
 }) {
-  const cx = dir === -1 ? ARROWS.leftX : ARROWS.rightX;
+  const cx = dir === -1 ? arrows.leftX : arrows.rightX;
 
   return (
     <g
@@ -188,13 +193,13 @@ function DayArrow({
       <rect
         className="day-arrow-hit"
         x={cx - ARROW_HALF_W - ARROW_HIT_PAD}
-        y={ARROWS.y - ARROW_HALF_H - ARROW_HIT_PAD}
+        y={arrows.y - ARROW_HALF_H - ARROW_HIT_PAD}
         width={2 * (ARROW_HALF_W + ARROW_HIT_PAD)}
         height={2 * (ARROW_HALF_H + ARROW_HIT_PAD)}
         fill="none"
         pointerEvents="all"
       />
-      <path className="day-arrow-mark" d={chevron(cx, ARROWS.y, dir)} strokeWidth={ARROW_STROKE} />
+      <path className="day-arrow-mark" d={chevron(cx, arrows.y, dir)} strokeWidth={ARROW_STROKE} />
     </g>
   );
 }
@@ -529,6 +534,8 @@ function DialNode({
           }
         }}
       >
+        {/* Invisible, wider than the bar, so a finger doesn't have to land on it. */}
+        <path className="meter-hit" d={track} strokeWidth={ARC_WIDTH * 2.5} />
         <path className="meter-rim" d={track} strokeWidth={ARC_WIDTH + ARC_RIM_EXTRA} />
         <path className="meter-channel" d={track} strokeWidth={ARC_WIDTH} />
         {/* Same width as the channel, so the fill reaches both of its edges. */}

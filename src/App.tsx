@@ -1,9 +1,10 @@
 import { useState, useSyncExternalStore } from 'react';
-import SaveNotice, { LoadFailed, Loading, NotConfigured, SignIn } from './Account';
+import SaveNotice, { AccountPill, LoadFailed, Loading, NotConfigured, SignIn } from './Account';
 import { getStatus, subscribeStatus } from './sync';
 import TriangleNodes from './TriangleNodes';
 import TrendsModal from './TrendsModal';
-import { VIEW, ZOOM } from './geometry';
+import { FRAMES } from './geometry';
+import { useCompact } from './useCompact';
 import { startOfWeek, todayISO, useDayLog } from './useDayLog';
 import './styles.css';
 
@@ -24,6 +25,7 @@ export default function App() {
 
 function Tracker() {
   const { date, log, toggle, setSleepHours, goDays, canGoBack, canGoForward } = useDayLog();
+  const frame = FRAMES[useCompact() ? 'compact' : 'wide'];
   const [trendsOpen, setTrendsOpen] = useState(false);
   const [trendsWeek, setTrendsWeek] = useState(() => startOfWeek(todayISO()));
 
@@ -38,9 +40,10 @@ function Tracker() {
       className="stage"
       /* The viewBox ratio and display zoom drive the layout, so CSS never
          hardcodes either. */
-      style={{ '--ratio': VIEW.w / VIEW.h, '--zoom': ZOOM } as React.CSSProperties}
+      style={{ '--ratio': frame.ratio, '--zoom': frame.zoom } as React.CSSProperties}
     >
       <TriangleNodes
+        frame={frame}
         log={log}
         date={date}
         canGoBack={canGoBack}
@@ -57,6 +60,7 @@ function Tracker() {
         onWeekStart={setTrendsWeek}
         onClose={() => setTrendsOpen(false)}
       />
+      <AccountPill />
       <SaveNotice />
     </main>
   );

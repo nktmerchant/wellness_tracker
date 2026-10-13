@@ -19,27 +19,34 @@ export default function SaveNotice() {
   );
 }
 
-/** Who's signed in, and the way out — at the foot of the trends view. */
-export function AccountLine() {
+/**
+ * Who's signed in, as a quiet pill in the top-left corner. Tapping it offers
+ * the way out, so a stray tap can't sign anyone out.
+ */
+export function AccountPill() {
   const status = useSyncExternalStore(subscribeStatus, getStatus);
+  const [open, setOpen] = useState(false);
   return (
-    <div className="trends-foot">
-      <span>
-        Signed in as <strong>{status.email}</strong>
-      </span>
-      <button
-        type="button"
-        onClick={() => {
-          if (
-            status.pending &&
-            !confirm('Some changes haven’t been saved yet and will be lost. Sign out anyway?')
-          )
-            return;
-          void signOut();
-        }}
-      >
-        Sign out
+    <div className={`account-pill${open ? ' is-open' : ''}`}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {status.email}
       </button>
+      {open && (
+        <button
+          type="button"
+          className="account-signout"
+          onClick={() => {
+            if (
+              status.pending &&
+              !confirm('Some changes haven’t been saved yet and will be lost. Sign out anyway?')
+            )
+              return;
+            void signOut();
+          }}
+        >
+          Sign out
+        </button>
+      )}
     </div>
   );
 }

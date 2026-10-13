@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { AccountLine } from './Account';
+import { useCompact } from './useCompact';
 import Icon from './Icon';
 import { NODES, type NodeSpec, type Slot } from './geometry';
 import {
@@ -19,17 +19,17 @@ import {
  * shape of a week is comparable to the shape of any other week.
  *
  * Lanes are drawn in a fixed viewBox and scaled to the modal's width
- * (width:100%, height:auto), so the whole view fits without scrolling.
+ * (width:100%, height:auto), so the whole view fits without scrolling. Text
+ * sizes are in viewBox units, so the viewBox width is chosen near the width
+ * it will actually render at: on a phone the 1000-unit desktop grid would
+ * shrink 13px labels to 4px. See GRIDS.
  */
-const DESIGN_W = 1000;
 /** Band above each lane's plot, holding its title. */
 const TITLE_H = 24;
 /** Plot height, identical for all three lanes. */
 const PLOT_H = 164;
 const LANE_H = TITLE_H + PLOT_H;
 const AXIS_H = 38;
-const GUTTER = 120;
-const PAD_R = 28;
 const PAD_V = 10;
 const DAYS_PER_WEEK = 7;
 
@@ -42,16 +42,40 @@ const DAYS_PER_WEEK = 7;
  */
 const SLEEP_FLOOR = 5;
 
-/**
- * The right edge shared by every lane's title and its row labels — which is
- * why the titles live in the SVG rather than in HTML above it. Only inside
- * the same scaled coordinate system can "Eating" be made to end exactly
- * where "Breakfast" does.
- */
-const LABEL_X = GUTTER - 14;
+/** The horizontal grid: viewBox width, the row-label gutter, the day columns. */
+type Grid = {
+  w: number;
+  gutter: number;
+  padR: number;
+  /**
+   * The right edge shared by every lane's title and its row labels — which
+   * is why the titles live in the SVG rather than in HTML above it. Only
+   * inside the same scaled coordinate system can "Eating" be made to end
+   * exactly where "Breakfast" does.
+   */
+  labelX: number;
+  colW: number;
+  colX: (i: number) => number;
+};
 
-const COL_W = (DESIGN_W - GUTTER - PAD_R) / DAYS_PER_WEEK;
-const colX = (i: number) => GUTTER + COL_W * (i + 0.5);
+function grid(w: number, gutter: number, padR: number): Grid {
+  const colW = (w - gutter - padR) / DAYS_PER_WEEK;
+  return {
+    w,
+    gutter,
+    padR,
+    labelX: gutter - 14,
+    colW,
+    colX: (i) => gutter + colW * (i + 0.5),
+  };
+}
+
+/*
+ * Compact is sized for a phone's modal (about 335px of chart width), so it
+ * renders close to 1:1. Its gutter still fits "Mid-morning", the longest row
+ * label.
+ */
+const GRIDS = { wide: grid(1000, 120, 28), compact: grid(340, 96, 10) };
 
 /** Vertical gaps: between stacked exercise discs, and between punch-card rows. */
 const STACK_GAP = 4;
@@ -66,11 +90,11 @@ const ROW_GAP = 3;
  *  - stack:  a multi-activity day stacks discs centred on the exercise spine
  *  - column: the horizontal pitch, so dense marks never touch sideways
  */
-function sharedRadius(busiest: number, rows: number): number {
+function sharedRadius(g: Grid, busiest: number, rows: number): number {
   const byRows = (PLOT_H - 2 * PAD_V - (rows - 1) * ROW_GAP) / (2 * rows);
   const half = PLOT_H / 2 - PAD_V;
   const byStack = (half - ((busiest - 1) / 2) * STACK_GAP) / busiest;
-  const byColumn = COL_W * 0.34;
+  const byColumn = g.colW * 0.34;
   return Math.min(byRows, byStack, byColumn);
 }
 
@@ -95,6 +119,7 @@ export default function TrendsModal({
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const g = GRIDS[useCompact() ? 'compact' : 'wide'];
 
   /*
    * The only effect here, and a legitimate one: <dialog> is an external system
@@ -133,7 +158,7 @@ export default function TrendsModal({
   const mealRows = meals.reveal.kind === 'fan' ? meals.reveal.slots.length : 5;
 
   const busiest = Math.max(1, ...days.map((d) => (d.future ? 0 : d.log.activities.length)));
-  const R = sharedRadius(busiest, mealRows);
+  const R = sharedRadius(g, busiest, mealRows);
 
   return (
     <dialog
@@ -173,12 +198,11 @@ export default function TrendsModal({
       </div>
 
       <div className="trends-body">
-        <ExerciseLane node={exercise} days={days} r={R} />
-        <MealsLane node={meals} days={days} r={R} />
-        <SleepLane node={sleep} days={days} r={R} />
-        <Axis days={days} />
+        <ExerciseLane g={g} node={exercise} days={days} r={R} />
+        <MealsLane g={g} node={meals} days={days} r={R} />
+        <SleepLane g={g} node={sleep} days={days} r={R} />
+        <Axis g={g} days={days} />
       </div>
-      <AccountLine />
     </dialog>
   );
 }
@@ -204,11 +228,13 @@ function NavChevron({ dir }: { dir: 1 | -1 }) {
  * drifts inward if it is ever given a box wider than its aspect ratio.
  */
 function Lane({
+  g,
   title,
   label,
   color,
   children,
 }: {
+  g: Grid;
   title: string;
   label: string;
   color: string;
@@ -218,7 +244,7 @@ function Lane({
     <div className="lane">
       <svg
         className="chart"
-        viewBox={`0 0 ${DESIGN_W} ${LANE_H}`}
+        viewBox={`0 0 ${g.w} ${LANE_H}`}
         preserveAspectRatio="xMinYMid meet"
         role="img"
         /* Single-series lanes, so the title carries identity — no legend. */
@@ -227,7 +253,7 @@ function Lane({
       >
         <text
           className="lane-title"
-          x={LABEL_X}
+          x={g.labelX}
           y={TITLE_H / 2}
           textAnchor="end"
           dominantBaseline="central"
@@ -250,7 +276,7 @@ function Lane({
  * between the pair, which reads as the line splitting around them, and on an
  * odd count a disc sits on the line itself.
  */
-function ExerciseLane({ node, days, r }: { node: NodeSpec; days: Day[]; r: number }) {
+function ExerciseLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[]; r: number }) {
   if (node.reveal.kind === 'dial') return null;
   const slots = node.reveal.slots;
   const spine = TITLE_H + PLOT_H / 2;
@@ -258,7 +284,7 @@ function ExerciseLane({ node, days, r }: { node: NodeSpec; days: Day[]; r: numbe
 
   const marks = days.map((day, i) => ({
     day,
-    x: colX(i),
+    x: g.colX(i),
     /* Slot order, not click order, so a day's stack never reshuffles. */
     done: day.future ? [] : slots.filter((s) => day.log.activities.includes(s.id)),
   }));
@@ -281,6 +307,7 @@ function ExerciseLane({ node, days, r }: { node: NodeSpec; days: Day[]; r: numbe
 
   return (
     <Lane
+      g={g}
       title="Exercise"
       color={node.color}
       label={`on ${count} of ${elapsed} days so far, ${sessions} sessions`}
@@ -315,7 +342,7 @@ function ExerciseLane({ node, days, r }: { node: NodeSpec; days: Day[]; r: numbe
 }
 
 /** A punch card: one row per meal, one column per day, filling the plot. */
-function MealsLane({ node, days, r }: { node: NodeSpec; days: Day[]; r: number }) {
+function MealsLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[]; r: number }) {
   if (node.reveal.kind === 'dial') return null;
   const slots = node.reveal.slots;
 
@@ -328,10 +355,10 @@ function MealsLane({ node, days, r }: { node: NodeSpec; days: Day[]; r: number }
   const complete = days.filter((d) => !d.future && d.log.meals.length === slots.length).length;
 
   return (
-    <Lane title="Eating" color={node.color} label={`all five on ${complete} of ${elapsed} days so far`}>
+    <Lane g={g} title="Eating" color={node.color} label={`all five on ${complete} of ${elapsed} days so far`}>
       {slots.map((slot, i) => (
         <g key={slot.id}>
-          <text className="row-label" x={LABEL_X} y={rowY(i)} textAnchor="end" dominantBaseline="central">
+          <text className="row-label" x={g.labelX} y={rowY(i)} textAnchor="end" dominantBaseline="central">
             {slot.label}
           </text>
           {days.map((day, c) => {
@@ -344,7 +371,7 @@ function MealsLane({ node, days, r }: { node: NodeSpec; days: Day[]; r: number }
                     day.future ? 'still to come' : on ? 'logged' : 'not logged'
                   }`}
                 </title>
-                <circle className={`cell ${state}`} cx={colX(c)} cy={rowY(i)} r={r} />
+                <circle className={`cell ${state}`} cx={g.colX(c)} cy={rowY(i)} r={r} />
               </g>
             );
           })}
@@ -359,7 +386,7 @@ function MealsLane({ node, days, r }: { node: NodeSpec; days: Day[]; r: number }
  * into segments at unlogged nights rather than bridging them — joining across
  * a gap would draw a night that was never recorded.
  */
-function SleepLane({ node, days, r }: { node: NodeSpec; days: Day[]; r: number }) {
+function SleepLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[]; r: number }) {
   if (node.reveal.kind !== 'dial') return null;
   const dial = node.reveal;
 
@@ -372,7 +399,7 @@ function SleepLane({ node, days, r }: { node: NodeSpec; days: Day[]; r: number }
   const points = days.map((d, i) =>
     d.future || d.log.sleepHours === null
       ? null
-      : { x: colX(i), y: yFor(d.log.sleepHours), v: d.log.sleepHours, date: d.date },
+      : { x: g.colX(i), y: yFor(d.log.sleepHours), v: d.log.sleepHours, date: d.date },
   );
 
   const segments: NonNullable<(typeof points)[number]>[][] = [];
@@ -392,6 +419,7 @@ function SleepLane({ node, days, r }: { node: NodeSpec; days: Day[]; r: number }
 
   return (
     <Lane
+      g={g}
       title="Sleep"
       color={node.color}
       label={
@@ -403,8 +431,8 @@ function SleepLane({ node, days, r }: { node: NodeSpec; days: Day[]; r: number }
       {/* Recessive: enough to read values against, quiet enough to ignore. */}
       {hourTicks(floor, dial.max).map((v) => (
         <g key={v}>
-          <line className="grid" x1={GUTTER - 6} y1={yFor(v)} x2={DESIGN_W - PAD_R} y2={yFor(v)} />
-          <text className="row-label" x={LABEL_X} y={yFor(v)} textAnchor="end" dominantBaseline="central">
+          <line className="grid" x1={g.gutter - 6} y1={yFor(v)} x2={g.w - g.padR} y2={yFor(v)} />
+          <text className="row-label" x={g.labelX} y={yFor(v)} textAnchor="end" dominantBaseline="central">
             {v === floor ? `≤${v}hr` : `${v}hr`}
           </text>
         </g>
@@ -432,20 +460,20 @@ function hourTicks(floor: number, max: number): number[] {
 }
 
 /** Shared axis: weekday initial over day number, on the lanes' column grid. */
-function Axis({ days }: { days: Day[] }) {
+function Axis({ g, days }: { g: Grid; days: Day[] }) {
   return (
     <svg
       className="chart axis"
-      viewBox={`0 0 ${DESIGN_W} ${AXIS_H}`}
+      viewBox={`0 0 ${g.w} ${AXIS_H}`}
       preserveAspectRatio="xMinYMid meet"
       aria-hidden="true"
     >
       {days.map((day, i) => (
         <g key={day.date} className={day.future ? 'is-future' : undefined}>
-          <text className="axis-dow" x={colX(i)} y={12} textAnchor="middle">
+          <text className="axis-dow" x={g.colX(i)} y={12} textAnchor="middle">
             {WEEKDAY_INITIALS[i]}
           </text>
-          <text className="axis-day" x={colX(i)} y={30} textAnchor="middle">
+          <text className="axis-day" x={g.colX(i)} y={30} textAnchor="middle">
             {Number(day.date.slice(8))}
           </text>
         </g>

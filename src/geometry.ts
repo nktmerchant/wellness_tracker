@@ -382,7 +382,15 @@ export function dialTicks(dial: { min: number; max: number }): number[] {
 export const dialReach = () => ARC_R + (ARC_WIDTH + ARC_RIM_EXTRA) / 2;
 export const dialLabelR = () => dialReach() + DIAL_LABEL_OFFSET;
 
-function nodeBox(node: NodeSpec): Box {
+type BoxOpts = {
+  /** Reserve room for label plaques. Off where plaques never open (touch). */
+  pills: boolean;
+  /** Satellite enlargement, see SAT_COMPACT_K. */
+  satK: number;
+  tickFont: number;
+};
+
+function nodeBox(node: NodeSpec, o: BoxOpts): Box {
   const c = polar({ x: 0, y: 0 }, TRIANGLE_R, node.outward);
   const boxes: Box[] = [around(c, NODE_R * NODE_HOVER_SCALE + STROKE / 2)];
 
@@ -390,7 +398,8 @@ function nodeBox(node: NodeSpec): Box {
   if (node.reveal.kind !== 'dial') {
     node.reveal.slots.forEach((slot, i) => {
       const at = polar(c, SAT_ORBIT, angles[i]);
-      boxes.push(around(at, SAT_R + STROKE / 2));
+      boxes.push(around(at, (SAT_R + STROKE / 2) * o.satK));
+      if (!o.pills) return;
       const r = pillRect(at, slot.label, pillDirection(node, angles[i]));
       const pad = STROKE / 2;
       boxes.push({
@@ -410,7 +419,7 @@ function nodeBox(node: NodeSpec): Box {
     for (const v of dialTicks(node.reveal)) {
       const frac = (v - node.reveal.min) / (node.reveal.max - node.reveal.min);
       const deg = axis - ARC_SPAN / 2 + frac * ARC_SPAN;
-      boxes.push(around(polar(c, labelR, deg), DIAL_TICK_FONT * 0.6));
+      boxes.push(around(polar(c, labelR, deg), o.tickFont * 0.6));
     }
   }
   return union(boxes);
@@ -437,7 +446,9 @@ const DATE_MAX_CHARS = 25;
  * The chrome is placed relative to the NODES' own extents, then folded into
  * the frame — rather than relative to the frame, which would be circular.
  */
-const NODE_EXT = union(NODES.map(nodeBox));
+const NODE_EXT = union(
+  NODES.map((n) => nodeBox(n, { pills: true, satK: 1, tickFont: DIAL_TICK_FONT })),
+);
 
 /*
  * The figure is NOT symmetric about the centroid — the eating capsules reach
@@ -445,7 +456,7 @@ const NODE_EXT = union(NODES.map(nodeBox));
  * skewed. Centring the chrome on that box puts it off-centre relative to the
  * triangle, which is what reads as misaligned. Mirroring the wider side gives
  * a box the triangle genuinely sits in the middle of, and since every box
- * below is then symmetric about x = 0, CENTER.x lands exactly on VIEW.w / 2.
+ * below is then symmetric about x = 0, CENTER.x lands exactly on the frame's middle.
  */
 const CONTENT_HALF_W = Math.max(-NODE_EXT.minX, NODE_EXT.maxX);
 
@@ -478,26 +489,101 @@ const EXTENTS = union([
   around({ x: ARROW_X, y: ARROW_Y }, ARROW_REACH_X, ARROW_REACH_Y),
 ]);
 
-export const VIEW = {
-  w: EXTENTS.maxX - EXTENTS.minX + 2 * MARGIN,
-  h: EXTENTS.maxY - EXTENTS.minY + 2 * MARGIN,
-};
-
 /** Centroid of the triangle, placed so the derived extents sit inside. */
 export const CENTER: Pt = {
   x: -EXTENTS.minX + MARGIN,
   y: -EXTENTS.minY + MARGIN,
 };
 
-/** Absolute positions of the chrome, now that CENTER is known. */
-export const ARROWS = {
-  y: CENTER.y + ARROW_Y,
-  leftX: CENTER.x - ARROW_X,
-  rightX: CENTER.x + ARROW_X,
+/* ---- frames ---- */
+
+/**
+ * What the pane shows and where its chrome sits. Nodes are always drawn at the
+ * same coordinates (around CENTER); a frame only picks the viewBox window and
+ * places the date and arrows, so switching layouts never moves the figure's
+ * own geometry.
+ */
+export type Frame = {
+  viewBox: string;
+  /** Width over height, for the pane's aspect-ratio. */
+  ratio: number;
+  arrows: { y: number; leftX: number; rightX: number };
+  date: Pt;
+  dateFont: number;
+  tickFont: number;
+  /** Satellite enlargement, see SAT_COMPACT_K. */
+  satK: number;
+  /** Display zoom; see ZOOM. */
+  zoom: number;
 };
 
-/** On the centroid, which the symmetric content box puts at the frame's middle. */
-export const DATE_POS: Pt = { x: CENTER.x, y: CENTER.y + DATE_Y };
+const frameFrom = (ext: Box): Pick<Frame, 'viewBox' | 'ratio'> => {
+  const w = ext.maxX - ext.minX + 2 * MARGIN;
+  const h = ext.maxY - ext.minY + 2 * MARGIN;
+  const x = CENTER.x + ext.minX - MARGIN;
+  const y = CENTER.y + ext.minY - MARGIN;
+  return { viewBox: `${x} ${y} ${w} ${h}`, ratio: w / h };
+};
+
+/** Desktop and other wide screens: arrows either side of the figure. */
+const WIDE: Frame = {
+  ...frameFrom(EXTENTS),
+  arrows: { y: CENTER.y + ARROW_Y, leftX: CENTER.x - ARROW_X, rightX: CENTER.x + ARROW_X },
+  /* On the centroid, which the symmetric content box puts at the frame's middle. */
+  date: { x: CENTER.x, y: CENTER.y + DATE_Y },
+  dateFont: DATE_FONT,
+  tickFont: DIAL_TICK_FONT,
+  satK: 1,
+  zoom: ZOOM,
+};
+
+/*
+ * Phones, held upright. A portrait screen has height to spare and no width,
+ * so the compact frame gives back everything that costs width:
+ *
+ *  - the arrows move from beside the figure to beside the date, below it,
+ *    where they also fall under the thumb
+ *  - no room is reserved for label plaques: they open on hover, and a
+ *    touch screen has none (styles.css keeps them shut there)
+ *  - the figure fills the width (zoom 1)
+ *
+ * and spends the scale that buys on what has to be read or tapped: bigger
+ * satellites, date and hour labels. Satellites grow about their own centres,
+ * so their spacing is unchanged; SAT_COMPACT_K is the most that still leaves
+ * a clear gap between neighbours in the eating fan, the tightest spacing.
+ */
+export const SAT_COMPACT_K = 1.35;
+const COMPACT_DATE_FONT = 60;
+const COMPACT_TICK_FONT = 44;
+/** Clear space between the date's longest form and each chevron. */
+const COMPACT_ARROW_GAP = 40;
+
+const C_NODE_EXT = union(
+  NODES.map((n) => nodeBox(n, { pills: false, satK: SAT_COMPACT_K, tickFont: COMPACT_TICK_FONT })),
+);
+const C_HALF_W = Math.max(-C_NODE_EXT.minX, C_NODE_EXT.maxX);
+const C_DATE_Y = C_NODE_EXT.maxY + DATE_GAP;
+const C_DATE_HALF_W = (DATE_MAX_CHARS * COMPACT_DATE_FONT * PILL_CHAR_EM) / 2;
+const C_ARROW_X = C_DATE_HALF_W + COMPACT_ARROW_GAP + ARROW_HALF_W;
+
+const COMPACT: Frame = {
+  ...frameFrom(
+    union([
+      { minX: -C_HALF_W, maxX: C_HALF_W, minY: C_NODE_EXT.minY, maxY: C_NODE_EXT.maxY },
+      around({ x: 0, y: C_DATE_Y }, C_DATE_HALF_W, COMPACT_DATE_FONT * 0.7),
+      around({ x: -C_ARROW_X, y: C_DATE_Y }, ARROW_REACH_X, ARROW_REACH_Y),
+      around({ x: C_ARROW_X, y: C_DATE_Y }, ARROW_REACH_X, ARROW_REACH_Y),
+    ]),
+  ),
+  arrows: { y: CENTER.y + C_DATE_Y, leftX: CENTER.x - C_ARROW_X, rightX: CENTER.x + C_ARROW_X },
+  date: { x: CENTER.x, y: CENTER.y + C_DATE_Y },
+  dateFont: COMPACT_DATE_FONT,
+  tickFont: COMPACT_TICK_FONT,
+  satK: SAT_COMPACT_K,
+  zoom: 1,
+};
+
+export const FRAMES = { wide: WIDE, compact: COMPACT };
 
 /** A bare chevron: back corner, point, back corner. dir 1 points right. */
 export function chevron(cx: number, cy: number, dir: 1 | -1): string {

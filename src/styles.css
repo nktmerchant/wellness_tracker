@@ -38,6 +38,14 @@ body {
     max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
 }
 
+/* Phones: the figure needs the width more than the page needs a margin.
+   Kept in step with useCompact.ts. */
+@media (max-width: 640px) {
+  body {
+    padding-inline: max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-right));
+  }
+}
+
 /* Vite's mount point sits between body and the stage; without a width here
    the percentage chain breaks before it reaches the SVG. */
 #root {
@@ -72,6 +80,10 @@ body {
   dragged, so the group cannot collapse mid-drag.
 */
 .node { cursor: pointer; }
+
+/* iOS flashes a grey box over any tapped SVG group; the figure has its own
+   feedback. */
+.pane { -webkit-tap-highlight-color: transparent; }
 .node:focus,
 .node :focus { outline: none; }
 
@@ -127,7 +139,7 @@ body {
   transform-origin: calc(var(--cx) * 1px) calc(var(--cy) * 1px);
   /* Pulled in toward the core as well as shrunk. The hover state lists the
      same functions so the two interpolate rather than snapping. */
-  transform: translate(var(--pull-x), var(--pull-y)) scale(var(--preview-scale));
+  transform: translate(var(--pull-x), var(--pull-y)) scale(calc(var(--preview-scale) * var(--sat-k)));
   transition: transform var(--pop-grow) var(--ease);
   transition-delay: calc(var(--i) * 20ms);
   /* Previews are display-only: too small to be comfortable tap targets. */
@@ -135,7 +147,8 @@ body {
 }
 
 .node:is(:hover, :focus-within, .is-open) .satellite {
-  transform: translate(0, 0) scale(1);
+  /* --sat-k enlarges satellites in the compact (phone) frame; 1 elsewhere. */
+  transform: translate(0, 0) scale(var(--sat-k));
   pointer-events: auto;
   /* Stagger outward from the axis, so the group unfurls rather than blinking. */
   transition-delay: calc(var(--i) * var(--pop-stagger) + 20ms);
@@ -150,6 +163,9 @@ body {
 */
 .capsule {
   fill: var(--blank);
+  /* Divided back out of the --sat-k enlargement, so the outline keeps the
+     figure's one weight. */
+  stroke-width: calc(var(--stroke) / var(--sat-k));
   width: calc(var(--w-closed) * 1px);
   transition: width var(--pill-in) var(--ease);
 }
@@ -175,6 +191,16 @@ body {
 }
 
 .satellite:focus-visible .capsule { stroke-width: 14px; }
+
+/*
+  Touch screens have no hover, so a plaque would only open as a sticky
+  leftover of the tap — and the compact frame leaves no room for one. The
+  icon says which slot it is; the accessible name still carries the label.
+*/
+@media (hover: none) {
+  .satellite:is(:hover, :focus-visible) .capsule { width: calc(var(--w-closed) * 1px); }
+  .satellite:is(:hover, :focus-visible) .pill-label { opacity: 0; }
+}
 
 /* Previews carry no icons — only fill state. */
 .satellite-icon {
@@ -263,6 +289,15 @@ body {
 
 .node.is-dragging .meter { cursor: grabbing; }
 
+/* The drag is the dial's, not the page's: without this a touch drag starts a
+   scroll, and the browser cancels the pointer mid-drag. */
+.meter { touch-action: none; }
+
+.meter-hit { stroke: transparent; }
+
+/* Only once open: the preview must stay undraggable (see .meter). */
+.node:is(:hover, :focus-within, .is-open) .meter-hit { pointer-events: stroke; }
+
 /* The rim is drawn wider than the channel, so its overhang is the outline. */
 .meter-rim { stroke: var(--outline); }
 .meter-channel { stroke: var(--blank); }
@@ -276,7 +311,7 @@ body {
 
 .dial-tick {
   fill: var(--outline);
-  font-size: 34px;
+  font-size: var(--tick-font);
   font-weight: 700;
   pointer-events: none;
 }
@@ -340,7 +375,7 @@ body {
 
 .day-label {
   fill: var(--outline);
-  font-size: 44px;
+  font-size: var(--date-font);
   font-weight: 700;
   letter-spacing: -0.01em;
   transition: fill 120ms var(--ease);
@@ -593,6 +628,24 @@ body {
 .axis .is-future .axis-dow,
 .axis .is-future .axis-day { fill: #c2c9d3; }
 
+/* Phones: the charts use the compact grid (TrendsModal GRIDS), sized for
+   the width these margins leave. Kept in step with useCompact.ts. */
+@media (max-width: 640px) {
+  .trends {
+    width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+
+  .trends-head {
+    gap: 8px;
+    padding: 8px 8px 8px 12px;
+  }
+
+  .week-label { min-width: 0; }
+
+  .trends-body { padding: 4px 12px 12px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .day-label,
   .trends-close {
@@ -643,41 +696,47 @@ body {
   margin-inline: auto;
 }
 
-/* Who's signed in, under the trends lanes. Quiet, like the axis labels. */
-.trends-foot {
-  flex: none;
+/*
+  Who's signed in. Grey until hovered, like the figure's other controls, and
+  in the opposite corner from the save notice so the two never collide.
+*/
+.account-pill {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 24px;
-  border-top: 3px solid var(--outline);
+  gap: 4px;
+  max-width: calc(100vw - 24px);
+  padding: 3px;
   font-size: 13px;
-  color: #555;
+  font-weight: 700;
+  color: var(--unset);
+  background: var(--bg);
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  transition: color 120ms var(--ease);
 }
 
-.trends-foot strong { color: var(--outline); }
+.account-pill:is(:hover, :focus-within, .is-open) { color: var(--outline); }
 
-.trends-foot button {
-  padding: 5px 12px;
+.account-pill button {
+  padding: 3px 9px;
   font: inherit;
-  font-weight: 700;
-  color: var(--outline);
-  background: var(--blank);
-  border: 2px solid var(--outline);
+  color: inherit;
+  background: none;
+  border: 0;
   border-radius: 999px;
   cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.trends-foot button:is(:hover, :focus-visible) {
+.account-pill .account-signout {
+  flex: none;
   color: var(--blank);
   background: var(--outline);
-}
-
-.account {
-  width: 100%;
-  max-width: 420px;
-  margin-inline: auto;
 }
 
 .account {
@@ -688,7 +747,6 @@ body {
   background: var(--bg);
   color: var(--outline);
 }
-
 
 .account-head {
   display: flex;
