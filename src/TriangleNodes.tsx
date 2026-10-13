@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ARROW_HALF_H,
   ARROW_HALF_W,
@@ -62,10 +62,17 @@ type Props = {
 
 
 /**
- * Reveal-on-hover stays in CSS (:hover / :focus-within on the group) so it
- * never touches the render path. React owns only what is genuinely stateful:
- * which slots are logged, the sleep value while it is dragged, and which
- * satellite is hovered — that last one only to control paint order.
+ * Which node is open is React state, not CSS :hover. A touch screen has no
+ * hover: iOS fakes one on tap and then leaves it stuck, so a :hover-driven
+ * node could never be closed again, and a satellite reacting to the fake
+ * hover made iOS swallow the tap as "just a hover". So:
+ *
+ *  - mouse: a node opens while the pointer is over it, and a satellite's
+ *    plaque opens while the pointer is over that satellite
+ *  - touch: tapping a node opens it, tapping it again closes it, and tapping
+ *    anywhere else closes it; plaques never open (no room, and no hover)
+ *  - keyboard: focus opens the node (:focus-within) and the plaque
+ *    (:focus-visible), all in CSS
  *
  * This file owns geometry — positions, radii, stroke widths — and the
  * stylesheet owns colour and motion.
@@ -81,6 +88,25 @@ export default function TriangleNodes({
   onToggle,
   onSetSleep,
 }: Props) {
+  /* The node opened by a tap. Mouse hover is tracked inside each node. */
+  const [tapped, setTapped] = useState<NodeSpec['id'] | null>(null);
+
+  /* A tap outside every node closes the open one. The document is an
+     external system, hence the effect. */
+  useEffect(() => {
+    if (!tapped) return;
+    const close = (e: Event) => {
+      if (!(e.target instanceof Element && e.target.closest('.node'))) setTapped(null);
+    };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [tapped]);
+
+  const tapProps = (id: NodeSpec['id']) => ({
+    tapped: tapped === id,
+    onTap: () => setTapped((prev) => (prev === id ? null : id)),
+  });
+
   return (
     <svg
       className="pane"
@@ -102,6 +128,7 @@ export default function TriangleNodes({
         node.reveal.kind === 'dial' ? (
           <DialNode
             key={node.id}
+            {...tapProps(node.id)}
             node={node}
             dial={node.reveal}
             value={log.sleepHours}
@@ -110,6 +137,7 @@ export default function TriangleNodes({
         ) : (
           <SlotNode
             key={node.id}
+            {...tapProps(node.id)}
             node={node}
             slots={node.reveal.slots}
             logged={node.id === 'exercise' ? log.activities : log.meals}
@@ -204,25 +232,47 @@ function DayArrow({
   );
 }
 
+/** Props every node takes for tap-to-open; see TriangleNodes. */
+type Tap = { tapped: boolean; onTap: () => void };
+
 /** Shared chrome: the hover target, the core disc, and the category icon. */
 function NodeShell({
   node,
-  open,
+  tapped,
+  onTap,
   dragging,
   children,
-}: {
+}: Tap & {
   node: NodeSpec;
-  open?: boolean;
   dragging?: boolean;
   children: React.ReactNode;
 }) {
+  const [hovered, setHovered] = useState(false);
+  /* The pointer that started the current press; a click doesn't say. */
+  const pointer = useRef('mouse');
   const c = nodeCenter(node);
+  const open = tapped || hovered || dragging;
   const classes = ['node', open && 'is-open', dragging && 'is-dragging']
     .filter(Boolean)
     .join(' ');
 
   return (
-    <g className={classes} style={{ '--color': node.color } as React.CSSProperties}>
+    <g
+      className={classes}
+      style={{ '--color': node.color } as React.CSSProperties}
+      onPointerEnter={(e) => e.pointerType === 'mouse' && setHovered(true)}
+      onPointerLeave={(e) => e.pointerType === 'mouse' && setHovered(false)}
+      onPointerDown={(e) => {
+        pointer.current = e.pointerType;
+      }}
+      onClick={(e) => {
+        /* Taps on the node itself toggle it; taps on its slots or dial are
+           theirs. A mouse already opened it by hovering. */
+        if (pointer.current === 'mouse') return;
+        if (e.target instanceof Element && e.target.closest('.satellite, .meter')) return;
+        onTap();
+      }}
+    >
       {/*
         Invisible target covering the node plus everything it reveals, so the
         pointer can travel out to a slot without the group collapsing.
@@ -253,8 +303,10 @@ function SatelliteSlot({
   angle,
   index,
   on,
+  hot,
   onToggle,
   onHover,
+  onFocusVisible,
 }: {
   node: NodeSpec;
   slot: Slot;
@@ -262,8 +314,14 @@ function SatelliteSlot({
   angle: number;
   index: number;
   on: boolean;
+  /** Plaque open: mouse over it, or keyboard focus. Never from a tap. */
+  hot: boolean;
   onToggle: () => void;
+  /** Mouse over the satellite. */
   onHover: (hovered: boolean) => void;
+  /** Keyboard focus. Kept apart from hover so a click's blur can't close the
+      plaque under a mouse that is still over it. */
+  onFocusVisible: (focused: boolean) => void;
 }) {
   const dir = pillDirection(node, angle);
   const cap = capsuleRect(at);
@@ -273,7 +331,7 @@ function SatelliteSlot({
 
   return (
     <g
-      className={`satellite${on ? ' is-on' : ''}${dir === -1 ? ' is-left' : ''}`}
+      className={`satellite${on ? ' is-on' : ''}${hot ? ' is-hot' : ''}${dir === -1 ? ' is-left' : ''}`}
       /*
         transform-origin is given explicitly in user units rather than relying
         on fill-box for a <g>, so the scale-in animation pivots on the
@@ -305,10 +363,11 @@ function SatelliteSlot({
          */
         if (e.detail > 0) e.currentTarget.blur();
       }}
-      onPointerEnter={() => onHover(true)}
-      onPointerLeave={() => onHover(false)}
-      onFocus={() => onHover(true)}
-      onBlur={() => onHover(false)}
+      onPointerEnter={(e) => e.pointerType === 'mouse' && onHover(true)}
+      onPointerLeave={(e) => e.pointerType === 'mouse' && onHover(false)}
+      /* A tap focuses too; only keyboard focus (:focus-visible) counts. */
+      onFocus={(e) => e.currentTarget.matches(':focus-visible') && onFocusVisible(true)}
+      onBlur={() => onFocusVisible(false)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -364,7 +423,8 @@ function SlotNode({
   slots,
   logged,
   onToggle,
-}: {
+  ...tap
+}: Tap & {
   node: NodeSpec;
   slots: Slot[];
   logged: string[];
@@ -373,21 +433,23 @@ function SlotNode({
   /*
    * SVG has no z-index: paint order is document order. A plaque is wider than
    * the gap between neighbouring satellites, so the hovered one is moved last
-   * in the list to keep its label from being covered. This is the only reason
-   * hover enters React state, and it changes at most once per hover.
+   * in the list to keep its label from being covered. Mouse and keyboard
+   * only: reordering under a finger mid-tap is what made iOS drop taps.
    */
   const [hovered, setHovered] = useState<string | null>(null);
+  const [focused, setFocused] = useState<string | null>(null);
+  const hot = (id: string) => id === hovered || id === focused;
 
   const c = nodeCenter(node);
   const angles = satelliteAngles(node);
   const order = slots.map((_, i) => i).sort((a, b) => {
-    const aHot = slots[a].id === hovered ? 1 : 0;
-    const bHot = slots[b].id === hovered ? 1 : 0;
+    const aHot = hot(slots[a].id) ? 1 : 0;
+    const bHot = hot(slots[b].id) ? 1 : 0;
     return aHot - bHot;
   });
 
   return (
-    <NodeShell node={node}>
+    <NodeShell node={node} {...tap}>
       {order.map((i) => {
         const slot = slots[i];
         return (
@@ -399,9 +461,11 @@ function SlotNode({
             angle={angles[i]}
             index={i}
             on={logged.includes(slot.id)}
+            hot={hot(slot.id)}
             onToggle={() => onToggle(slot.id)}
-            onHover={(isHovered) =>
-              setHovered((prev) => (isHovered ? slot.id : prev === slot.id ? null : prev))
+            onHover={(on) => setHovered((prev) => (on ? slot.id : prev === slot.id ? null : prev))}
+            onFocusVisible={(on) =>
+              setFocused((prev) => (on ? slot.id : prev === slot.id ? null : prev))
             }
           />
         );
@@ -426,7 +490,8 @@ function DialNode({
   dial,
   value,
   onChange,
-}: {
+  ...tap
+}: Tap & {
   node: NodeSpec;
   dial: Dial;
   value: number | null;
@@ -465,7 +530,7 @@ function DialNode({
     onChange(Math.min(dial.max, Math.max(dial.min, shown + delta * dial.step)));
 
   return (
-    <NodeShell node={node} open={dragging} dragging={dragging}>
+    <NodeShell node={node} {...tap} dragging={dragging}>
       <g
         ref={groupRef}
         className={`meter${unset ? ' is-unset' : ''}`}
