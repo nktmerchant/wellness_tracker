@@ -9,7 +9,8 @@
  *   everything else    cached copy at once, refreshed in the background
  *
  * Only same-origin GETs are handled. Supabase calls go straight to the
- * network; the app keeps its own offline copy of the data (see store.ts).
+ * network, and the log itself is never cached: offline, the app opens to a
+ * "can't reach the server" screen.
  */
 const CACHE = 'triangle-v1';
 

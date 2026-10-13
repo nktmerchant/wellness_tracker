@@ -1,18 +1,16 @@
 /**
- * Background sync between the on-device store and Supabase.
+ * Supabase is where the log lives. This module signs in, loads the signed-in
+ * user's days into the in-memory store, and saves edits back.
  *
- * Local-first: every edit lands in store.ts immediately, and this module
- * reconciles in the background — after edits, on launch, when the app comes
- * back to the foreground and when the network returns. Without Supabase
- * configured (no VITE_SUPABASE_* at build time) it does nothing and the app
- * is local-only.
- *
- * Conflicts are last-write-wins per day, by edit time. One person on a couple
- * of devices rarely edits the same day on both while offline, and when they
- * do the newer edit is the one they meant.
+ * Edits show on screen immediately and are saved after a short pause, so a
+ * dial drag is one request rather than one per step. A day with an unsaved
+ * edit is never overwritten by a reload, so a slow save can't be undone by a
+ * refresh that raced it. The app needs the network: there is no copy on the
+ * device, and a failed save is shown and retried, not queued for later.
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { emit, readStored, storedDates, subscribe, writeSynced } from './store';
+import { applyServer, clearDays, onEdit, readDay } from './store';
+import type { DayLog } from './useDayLog';
 
 const URL = import.meta.env.VITE_SUPABASE_URL;
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -27,30 +25,35 @@ type Row = {
   updated_at: string;
 };
 
-/* ---- status, for the account UI ---- */
+/* ---- status, for the sign-in gate and the account chip ---- */
 
-export type SyncStatus = {
-  /** False when the build has no Supabase settings: local-only mode. */
+export type Status = {
+  /** False when the build has no Supabase settings; the app can't run. */
   configured: boolean;
+  auth: 'checking' | 'signed-out' | 'signed-in';
   email: string | null;
-  state: 'idle' | 'syncing' | 'error' | 'offline';
-  /** Days edited here that the server has not confirmed yet. */
+  /** The first load after sign-in; the app is shown once it's 'ready'. */
+  load: 'loading' | 'ready' | 'error';
+  loadError: string | null;
+  save: 'saved' | 'saving' | 'error';
+  saveError: string | null;
+  /** Days edited on screen that the server hasn't confirmed yet. */
   pending: number;
-  lastSynced: number | null;
-  error: string | null;
 };
 
-let status: SyncStatus = {
+let status: Status = {
   configured: supabase !== null,
+  auth: 'checking',
   email: null,
-  state: 'idle',
+  load: 'loading',
+  loadError: null,
+  save: 'saved',
+  saveError: null,
   pending: 0,
-  lastSynced: null,
-  error: null,
 };
 const statusListeners = new Set<() => void>();
 
-function setStatus(patch: Partial<SyncStatus>) {
+function setStatus(patch: Partial<Status>) {
   status = { ...status, ...patch };
   statusListeners.forEach((l) => l());
 }
@@ -61,117 +64,115 @@ export function subscribeStatus(l: () => void): () => void {
   return () => statusListeners.delete(l);
 }
 
-const dirtyDates = () => storedDates().filter((d) => readStored(d)?.dirty);
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-/* ---- the sync pass ---- */
+/* ---- loading ---- */
 
-let running = false;
-let again = false;
-/** Set while a pull's changes are announced, so they don't read as edits. */
-let applyingRemote = false;
-
-/**
- * Pull, then push. Pulling first means a newer edit from another device
- * replaces a stale local one before it can be uploaded over the top.
- * Overlapping calls collapse into one follow-up pass.
- */
-export async function sync(): Promise<void> {
-  if (!supabase || !status.email) return;
-  if (!navigator.onLine) {
-    setStatus({ state: 'offline', pending: dirtyDates().length });
-    return;
-  }
-  if (running) {
-    again = true;
-    return;
-  }
-  running = true;
-  setStatus({ state: 'syncing', error: null });
-  try {
-    if (await pull()) {
-      applyingRemote = true;
-      emit();
-      applyingRemote = false;
-    }
-    await push();
-    setStatus({ state: 'idle', lastSynced: Date.now() });
-  } catch (e) {
-    setStatus({ state: 'error', error: e instanceof Error ? e.message : String(e) });
-  } finally {
-    running = false;
-    setStatus({ pending: dirtyDates().length });
-    if (again) {
-      again = false;
-      void sync();
-    }
-  }
-}
-
-/** Returns whether anything local changed. */
-async function pull(): Promise<boolean> {
-  let changed = false;
+async function fetchAll(): Promise<Map<string, DayLog>> {
+  const out = new Map<string, DayLog>();
   /* PostgREST caps a response at 1000 rows by default, so page through. */
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase!
       .from('day_logs')
-      .select('day, activities, meals, sleep_hours, updated_at')
+      .select('day, activities, meals, sleep_hours')
       .order('day')
       .range(from, from + PAGE - 1);
     if (error) throw error;
     for (const row of data as Row[]) {
-      const remoteAt = Date.parse(row.updated_at);
-      const local = readStored(row.day);
-      if (local && local.updatedAt >= remoteAt) continue;
-      writeSynced(
-        row.day,
-        { activities: row.activities, meals: row.meals, sleepHours: row.sleep_hours },
-        remoteAt,
-      );
-      changed = true;
+      out.set(row.day, {
+        activities: row.activities,
+        meals: row.meals,
+        sleepHours: row.sleep_hours,
+      });
     }
-    if (data.length < PAGE) return changed;
+    if (data.length < PAGE) return out;
   }
 }
 
-async function push(): Promise<void> {
-  const dates = dirtyDates();
-  if (dates.length === 0) return;
-  const sent = dates.map((day) => {
-    const s = readStored(day)!;
-    return { day, stamp: s.updatedAt, row: toRow(day, s) };
+/**
+ * The first load blocks the app behind a loading screen; later reloads (when
+ * the app comes back to the foreground) happen behind the scenes, and a
+ * failure there just leaves what's on screen.
+ */
+export async function load(): Promise<void> {
+  const blocking = status.load !== 'ready';
+  const uid = userId;
+  if (blocking) setStatus({ load: 'loading', loadError: null });
+  try {
+    const rows = await fetchAll();
+    if (uid !== userId) return; // signed out or switched while loading
+    applyServer(rows, new Set(pending.keys()));
+    if (blocking) setStatus({ load: 'ready' });
+  } catch (e) {
+    if (blocking && uid === userId) setStatus({ load: 'error', loadError: message(e) });
+  }
+}
+
+/* ---- saving ---- */
+
+/** Unsaved days, each with a count of edits so far. */
+const pending = new Map<string, number>();
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let saving = false;
+let saveAgain = false;
+
+function queueSave(date: string) {
+  pending.set(date, (pending.get(date) ?? 0) + 1);
+  setStatus({ pending: pending.size, save: status.save === 'error' ? 'error' : 'saving' });
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => void save(), 800);
+}
+
+/** Saves every pending day in one request. Overlapping calls collapse. */
+export async function save(): Promise<void> {
+  clearTimeout(saveTimer);
+  if (!supabase || pending.size === 0) return;
+  if (saving) {
+    saveAgain = true;
+    return;
+  }
+  saving = true;
+  const uid = userId;
+  const sent = [...pending].map(([day, edits]) => {
+    const log = readDay(day);
+    const row: Row = {
+      day,
+      activities: log.activities,
+      meals: log.meals,
+      sleep_hours: log.sleepHours,
+      updated_at: new Date().toISOString(),
+    };
+    return { day, edits, row };
   });
-  const { error } = await supabase!
-    .from('day_logs')
-    .upsert(sent.map((s) => s.row), { onConflict: 'user_id,day' });
-  if (error) throw error;
-  /*
-   * Only clear the flag if the record is still the one that was sent: an
-   * edit made while the request was in flight must stay queued.
-   */
-  for (const { day, stamp } of sent) {
-    const now = readStored(day);
-    if (now && now.updatedAt === stamp) writeSynced(day, now, stamp);
+  setStatus({ save: 'saving' });
+  try {
+    const { error } = await supabase
+      .from('day_logs')
+      .upsert(sent.map((s) => s.row), { onConflict: 'user_id,day' });
+    if (error) throw error;
+    if (uid !== userId) return;
+    /* A day edited again while the request was in flight stays pending. */
+    for (const { day, edits } of sent) {
+      if (pending.get(day) === edits) pending.delete(day);
+    }
+    setStatus({ save: 'saved', saveError: null, pending: pending.size });
+  } catch (e) {
+    if (uid === userId) setStatus({ save: 'error', saveError: message(e) });
+  } finally {
+    saving = false;
+    if (saveAgain || (pending.size > 0 && status.save !== 'error')) {
+      saveAgain = false;
+      void save();
+    }
   }
-}
-
-function toRow(day: string, s: NonNullable<ReturnType<typeof readStored>>): Row {
-  return {
-    day,
-    activities: s.activities,
-    meals: s.meals,
-    sleep_hours: s.sleepHours,
-    /* A legacy record has no edit time; upload it as "the epoch" so it never
-       outranks anything another device wrote. */
-    updated_at: new Date(s.updatedAt).toISOString(),
-  };
 }
 
 /* ---- sign-in: email and password ---- */
 
 /*
- * No sign-up here: the one account is created in the Supabase dashboard and
- * new sign-ups are turned off, so nothing in the app can create users.
+ * No sign-up here: accounts are created in the Supabase dashboard and new
+ * sign-ups are turned off, so nothing in the app can create users.
  */
 export async function signIn(email: string, password: string): Promise<void> {
   const { error } = await supabase!.auth.signInWithPassword({ email, password });
@@ -184,28 +185,50 @@ export async function signOut(): Promise<void> {
 
 /* ---- wiring ---- */
 
-let debounce: ReturnType<typeof setTimeout> | undefined;
+let userId: string | null = null;
 
 export function startSync(): void {
   if (!supabase) return;
 
+  /*
+   * Fires once at start with the saved session (or none), then on sign-in and
+   * sign-out. Token refreshes keep the same user and are ignored. Work is
+   * deferred out of the callback: awaiting Supabase calls inside it can
+   * deadlock on the auth lock.
+   */
   supabase.auth.onAuthStateChange((_event, session) => {
-    const email = session?.user.email ?? null;
-    if (email === status.email) return;
-    setStatus({ email, pending: dirtyDates().length });
-    if (email) void sync();
+    const uid = session?.user.id ?? null;
+    if (uid === userId && status.auth !== 'checking') return;
+    userId = uid;
+    clearTimeout(saveTimer);
+    pending.clear();
+    clearDays();
+    setStatus({
+      auth: uid ? 'signed-in' : 'signed-out',
+      email: session?.user.email ?? null,
+      load: 'loading',
+      loadError: null,
+      save: 'saved',
+      saveError: null,
+      pending: 0,
+    });
+    if (uid) setTimeout(() => void load(), 0);
   });
 
-  /* Local edits: wait for a pause, so a dial drag uploads once, not per step. */
-  subscribe(() => {
-    if (applyingRemote) return;
-    setStatus({ pending: dirtyDates().length });
-    clearTimeout(debounce);
-    debounce = setTimeout(() => void sync(), 1500);
-  });
+  onEdit(queueSave);
 
-  window.addEventListener('online', () => void sync());
+  const retry = () => {
+    if (status.auth !== 'signed-in') return;
+    if (status.load === 'ready') void load();
+    void save();
+  };
+  window.addEventListener('online', retry);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') void sync();
+    /* Leaving the app: save now rather than after the pause. */
+    if (document.visibilityState === 'hidden') void save();
+    else retry();
+  });
+  window.addEventListener('beforeunload', (e) => {
+    if (pending.size > 0) e.preventDefault();
   });
 }

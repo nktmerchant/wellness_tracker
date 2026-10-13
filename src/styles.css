@@ -631,11 +631,17 @@ body {
   background: currentColor;
 }
 
-/* Only states that need attention take colour; idle stays recessive. */
+/* Only states that need attention take colour; saved stays recessive. */
 .account-chip.is-error .account-dot { background: #e03131; }
-.account-chip.is-offline .account-dot,
-.account-chip.is-syncing .account-dot { background: #f08c00; }
-.account-chip.is-idle .account-dot { background: #2f9e44; }
+.account-chip.is-saving .account-dot { background: #f08c00; }
+.account-chip.is-saved .account-dot { background: #2f9e44; }
+
+/* Sign-in, loading and connection errors: the account card, alone on the page. */
+.gate .account {
+  width: 100%;
+  max-width: 420px;
+  margin-inline: auto;
+}
 
 .account {
   border: 5px solid var(--outline);
