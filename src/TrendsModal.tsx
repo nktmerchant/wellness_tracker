@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { useCompact } from './useCompact';
 import Icon from './Icon';
+import { HalfFill } from './TriangleNodes';
 import { NODES, type NodeSpec, type Slot } from './geometry';
 import {
   FIRST_DAY,
   WEEKDAY_INITIALS,
   formatShortDay,
+  mealState,
   readDay,
   useLogVersion,
   startOfWeek,
@@ -356,22 +358,33 @@ function MealsLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[];
 
   return (
     <Lane g={g} title="Eating" color={node.color} label={`all five on ${complete} of ${elapsed} days so far`}>
+      <HalfFill id="trend-half-meals" color={node.color} />
       {slots.map((slot, i) => (
         <g key={slot.id}>
           <text className="row-label" x={g.labelX} y={rowY(i)} textAnchor="end" dominantBaseline="central">
             {slot.label}
           </text>
           {days.map((day, c) => {
-            const on = !day.future && day.log.meals.includes(slot.id);
-            const state = day.future ? 'is-future' : on ? 'is-on' : 'is-off';
+            const meal = mealState(day.log.meals, slot.id);
+            const state = day.future
+              ? 'is-future'
+              : meal === 'full' ? 'is-on' : meal === 'half' ? 'is-half' : 'is-off';
             return (
               <g key={day.date}>
                 <title>
                   {`${formatShortDay(day.date)} · ${slot.label}: ${
-                    day.future ? 'still to come' : on ? 'logged' : 'not logged'
+                    day.future
+                      ? 'still to come'
+                      : meal === 'full' ? 'logged' : meal === 'half' ? 'half' : 'not logged'
                   }`}
                 </title>
-                <circle className={`cell ${state}`} cx={g.colX(c)} cy={rowY(i)} r={r} />
+                <circle
+                  className={`cell ${state}`}
+                  cx={g.colX(c)}
+                  cy={rowY(i)}
+                  r={r}
+                  style={{ '--half-fill': 'url(#trend-half-meals)' } as React.CSSProperties}
+                />
               </g>
             );
           })}

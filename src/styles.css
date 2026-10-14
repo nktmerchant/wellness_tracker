@@ -186,8 +186,10 @@ body {
   transition: width var(--pill-in) var(--ease);
 }
 
-/* Unlogged reads as an empty outline; logged fills with the node's colour. */
+/* Unlogged reads as an empty outline; logged fills with the node's colour,
+   and a half-logged meal fills its lower half (gradient set from React). */
 .satellite.is-on .capsule { fill: var(--color); }
+.satellite.is-half .capsule { fill: var(--half-fill); }
 
 /*
   Capsules are always built growing rightward, then mirrored for the ones that
@@ -573,6 +575,7 @@ body {
 }
 
 .cell.is-on { fill: var(--color); }
+.cell.is-half { fill: var(--half-fill); }
 .cell.is-off { fill: var(--blank); }
 
 /*

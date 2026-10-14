@@ -46,7 +46,7 @@ import {
   type Slot,
 } from './geometry';
 import Icon from './Icon';
-import { formatDay, type DayLog } from './useDayLog';
+import { formatDay, mealState, type DayLog, type MealState } from './useDayLog';
 
 type Props = {
   frame: Frame;
@@ -140,7 +140,11 @@ export default function TriangleNodes({
             {...tapProps(node.id)}
             node={node}
             slots={node.reveal.slots}
-            logged={node.id === 'exercise' ? log.activities : log.meals}
+            stateOf={(id) =>
+              node.id === 'exercise'
+                ? log.activities.includes(id) ? 'full' : 'empty'
+                : mealState(log.meals, id)
+            }
             onToggle={(id) => onToggle(node.id === 'exercise' ? 'activities' : 'meals', id)}
           />
         ),
@@ -294,7 +298,8 @@ function NodeShell({
 
 /**
  * One satellite: a tappable checkbox for a slot, which on hover unfurls a
- * plaque carrying its icon and name.
+ * plaque carrying its icon and name. Meals can also be half logged, which
+ * fills the lower half (aria "mixed").
  */
 function SatelliteSlot({
   node,
@@ -302,7 +307,7 @@ function SatelliteSlot({
   at,
   angle,
   index,
-  on,
+  state,
   hot,
   onToggle,
   onHover,
@@ -313,7 +318,7 @@ function SatelliteSlot({
   at: Pt;
   angle: number;
   index: number;
-  on: boolean;
+  state: MealState;
   /** Plaque open: mouse over it, or keyboard focus. Never from a tap. */
   hot: boolean;
   onToggle: () => void;
@@ -331,7 +336,7 @@ function SatelliteSlot({
 
   return (
     <g
-      className={`satellite${on ? ' is-on' : ''}${hot ? ' is-hot' : ''}${dir === -1 ? ' is-left' : ''}`}
+      className={`satellite${state === 'full' ? ' is-on' : state === 'half' ? ' is-half' : ''}${hot ? ' is-hot' : ''}${dir === -1 ? ' is-left' : ''}`}
       /*
         transform-origin is given explicitly in user units rather than relying
         on fill-box for a <g>, so the scale-in animation pivots on the
@@ -346,10 +351,11 @@ function SatelliteSlot({
           '--i': index,
           '--w-closed': cap.closed,
           '--w-open': pillWidth(slot.label),
+          '--half-fill': `url(#half-${node.id})`,
         } as React.CSSProperties
       }
       role="checkbox"
-      aria-checked={on}
+      aria-checked={state === 'full' ? true : state === 'half' ? 'mixed' : false}
       aria-label={slot.label}
       tabIndex={0}
       onClick={(e) => {
@@ -421,13 +427,13 @@ function SatelliteSlot({
 function SlotNode({
   node,
   slots,
-  logged,
+  stateOf,
   onToggle,
   ...tap
 }: Tap & {
   node: NodeSpec;
   slots: Slot[];
-  logged: string[];
+  stateOf: (id: string) => MealState;
   onToggle: (id: string) => void;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);
@@ -456,6 +462,7 @@ function SlotNode({
 
   return (
     <NodeShell node={node} {...tap}>
+      <HalfFill id={`half-${node.id}`} color={node.color} />
       {order.map((i) => {
         const slot = slots[i];
         return (
@@ -466,7 +473,7 @@ function SlotNode({
             at={polar(c, SAT_ORBIT, angles[i])}
             angle={angles[i]}
             index={i}
-            on={logged.includes(slot.id)}
+            state={stateOf(slot.id)}
             hot={hot(slot.id)}
             onToggle={() => onToggle(slot.id)}
             onHover={(on) => setHovered((prev) => (on ? slot.id : prev === slot.id ? null : prev))}
@@ -477,6 +484,23 @@ function SlotNode({
         );
       })}
     </NodeShell>
+  );
+}
+
+/**
+ * The half-logged fill: blank above, the node's colour below, with a hard
+ * edge at the middle. Sized to whatever shape uses it, so the split stays
+ * level as a capsule widens into its plaque. Referenced by id because a
+ * gradient can't take its colour from the shape's CSS variables.
+ */
+export function HalfFill({ id, color }: { id: string; color: string }) {
+  return (
+    <defs>
+      <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0.5" style={{ stopColor: 'var(--blank)' }} />
+        <stop offset="0.5" stopColor={color} />
+      </linearGradient>
+    </defs>
   );
 }
 
