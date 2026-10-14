@@ -430,23 +430,29 @@ function SlotNode({
   logged: string[];
   onToggle: (id: string) => void;
 }) {
-  /*
-   * SVG has no z-index: paint order is document order. A plaque is wider than
-   * the gap between neighbouring satellites, so the hovered one is moved last
-   * in the list to keep its label from being covered. Mouse and keyboard
-   * only: reordering under a finger mid-tap is what made iOS drop taps.
-   */
   const [hovered, setHovered] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
   const hot = (id: string) => id === hovered || id === focused;
 
   const c = nodeCenter(node);
   const angles = satelliteAngles(node);
-  const order = slots.map((_, i) => i).sort((a, b) => {
-    const aHot = hot(slots[a].id) ? 1 : 0;
-    const bHot = hot(slots[b].id) ? 1 : 0;
-    return aHot - bHot;
-  });
+
+  /*
+   * SVG has no z-index: paint order is document order, and a plaque is wider
+   * than the gap between neighbouring satellites. A plaque only ever grows
+   * horizontally away from the core, so painting each side's satellites
+   * outermost-first puts every plaque above everything it can reach.
+   *
+   * The order is fixed. It used to move the hovered satellite to the end, but
+   * moving an element in the DOM cancels its running CSS transitions, so the
+   * plaque snapped open and its neighbours snapped shut mid-animation.
+   */
+  const order = slots
+    .map((_, i) => i)
+    .sort((a, b) => {
+      const reach = (i: number) => pillDirection(node, angles[i]) * Math.cos((angles[i] * Math.PI) / 180);
+      return reach(b) - reach(a);
+    });
 
   return (
     <NodeShell node={node} {...tap}>

@@ -7,10 +7,14 @@
   --unset: #b6bec9;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 
+  /* A gentler ease-out for the satellites: --ease covers most of its
+     distance in the first few frames, which read as a jump at this size. */
+  --ease-grow: cubic-bezier(0.33, 1, 0.68, 1);
+
   /* Reveal timings. The core's own scale is deliberately slower than these. */
   --pop-fade: 130ms;
-  --pop-grow: 190ms;
-  --pop-stagger: 26ms;
+  --pop-grow: 300ms;
+  --pop-stagger: 24ms;
   --meter-in: 200ms;
   --meter-fill: 400ms;
   --pill-in: 200ms;
@@ -152,8 +156,8 @@ body {
   /* Pulled in toward the core as well as shrunk. The hover state lists the
      same functions so the two interpolate rather than snapping. */
   transform: translate(var(--pull-x), var(--pull-y)) scale(calc(var(--preview-scale) * var(--sat-k)));
-  transition: transform var(--pop-grow) var(--ease);
-  transition-delay: calc(var(--i) * 20ms);
+  transition: transform var(--pop-grow) var(--ease-grow);
+  transition-delay: calc(var(--i) * 16ms);
   /* Previews are display-only: too small to be comfortable tap targets. */
   pointer-events: none;
 }
@@ -197,8 +201,10 @@ body {
   transform: scaleX(-1);
 }
 
-/* Expanded only under a mouse (.is-hot, from React) or keyboard focus. */
-.satellite:is(.is-hot, :focus-visible) .capsule {
+/* Expanded only under a mouse (.is-hot, from React) or keyboard focus, and
+   only while the node is open: a closing node always takes its plaque with
+   it, even if the pointer left too fast for a pointerleave to land. */
+.node:is(:focus-within, .is-open) .satellite:is(.is-hot, :focus-visible) .capsule {
   width: calc(var(--w-open) * 1px);
 }
 
@@ -234,7 +240,7 @@ body {
 
 .satellite.is-on .pill-label { fill: var(--blank); }
 
-.satellite:is(.is-hot, :focus-visible) .pill-label {
+.node:is(:focus-within, .is-open) .satellite:is(.is-hot, :focus-visible) .pill-label {
   opacity: 1;
   transition-delay: 90ms;
 }
