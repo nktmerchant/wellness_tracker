@@ -593,6 +593,9 @@ body {
   pointer-events: none;
 }
 
+/* Half its disc is blank, so the icon takes the outline colour instead. */
+.cell-icon.is-half { color: var(--outline); }
+
 .row-label {
   fill: #5d6775;
   font-size: 13px;
@@ -661,35 +664,113 @@ body {
   }
 }
 
+/* ---- settings modal ---- */
+
+/* The trends frame, sized for a list rather than a chart. */
+.settings { width: min(720px, calc(100vw - 48px)); }
+
+.settings-title {
+  margin: 0 auto 0 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.settings-body { padding: 16px 24px 22px; }
+
+.settings-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.settings-section-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.settings-count {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* One plain ruled table per group, side by side, wrapping on narrow screens. */
+.settings-tables {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.settings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.settings-table th {
+  padding: 4px 6px;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 2px solid var(--outline);
+}
+
+.settings-table td {
+  padding: 0;
+  border-bottom: 1px solid #e7eaef;
+}
+
+.settings-table label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px;
+  cursor: pointer;
+}
+
+.settings-table label.is-on { font-weight: 700; }
+
+.settings-table input {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #e03131;
+  cursor: inherit;
+}
+
+/* Full up: the unticked rest recede until one is unticked. */
+.settings-table label:has(input:disabled:not(:checked)) {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.settings-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: currentColor;
+}
+
+@media (max-width: 640px) {
+  .settings { width: calc(100vw - 24px); }
+  .settings-body { padding: 12px 12px 16px; }
+  .settings-tables { grid-template-columns: 1fr 1fr; }
+}
+
 /* ---- account and sync ---- */
 
-/* Top-right corner: the share pill, with any save warning below it. */
+/* Top-right corner: any save warning. */
 .corner-right {
   position: fixed;
   top: max(12px, env(safe-area-inset-top));
   right: max(12px, env(safe-area-inset-right));
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
 }
-
-/* Quiet like the account pill opposite, until hovered or just used. */
-.share-pill {
-  padding: 6px 12px;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: inherit;
-  color: var(--unset);
-  background: var(--bg);
-  border: 2px solid currentColor;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: color 120ms var(--ease);
-}
-
-.share-pill:is(:hover, :focus-visible, .is-done) { color: var(--outline); }
 
 /* Shown only while a save is failing; saving itself is silent. */
 .save-notice {
@@ -730,46 +811,98 @@ body {
 }
 
 /*
-  Who's signed in. Grey until hovered, like the figure's other controls, and
-  in the opposite corner from the save notice so the two never collide.
+  Who's signed in, opening a menu of Share and Log out. Grey until hovered,
+  like the figure's other controls, and in the opposite corner from the save
+  notice so the two never collide.
 */
-.account-pill {
+.account-menu {
   position: fixed;
   top: max(12px, env(safe-area-inset-top));
   left: max(12px, env(safe-area-inset-left));
   display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   max-width: calc(100vw - 24px);
-  padding: 3px;
   font-size: 13px;
   font-weight: 700;
   color: var(--unset);
-  background: var(--bg);
-  border: 2px solid currentColor;
-  border-radius: 999px;
   transition: color 120ms var(--ease);
 }
 
-.account-pill:is(:hover, :focus-within, .is-open) { color: var(--outline); }
+.account-menu:is(:hover, :focus-within, .is-open) { color: var(--outline); }
 
-.account-pill button {
-  padding: 3px 9px;
+.account-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 6px 8px 6px 12px;
   font: inherit;
   color: inherit;
-  background: none;
-  border: 0;
+  background: var(--bg);
+  border: 2px solid currentColor;
   border-radius: 999px;
   cursor: pointer;
+}
+
+.account-email {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.account-pill .account-signout {
+.account-caret {
   flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.account-caret {
+  width: 12px;
+  height: 12px;
+  transition: transform 120ms var(--ease);
+}
+
+.account-menu.is-open .account-caret { transform: rotate(180deg); }
+
+.account-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  padding: 4px;
+  background: var(--bg);
+  border: 2px solid currentColor;
+  border-radius: 14px;
+}
+
+.account-list button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  color: var(--outline);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.account-list button:is(:hover, :focus-visible) {
   color: var(--blank);
   background: var(--outline);
+}
+
+.menu-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
 }
 
 .account {

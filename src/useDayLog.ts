@@ -13,24 +13,24 @@ export type DayLog = {
 };
 
 /**
- * A meal is eaten, half eaten, or not logged. A half meal is stored in the
- * same meals list with a suffix ("lunch:half"), so the table needs no new
- * column and each meal still has at most one entry.
+ * A meal or an exercise is done, half done, or not logged. A half is stored
+ * in the same list with a suffix ("lunch:half", "run:half"), so the table
+ * needs no new column and each slot still has at most one entry.
  */
-export type MealState = 'full' | 'half' | 'empty';
+export type SlotState = 'full' | 'half' | 'empty';
 
 const HALF = ':half';
 
-export function mealState(meals: string[], id: string): MealState {
-  if (meals.includes(id)) return 'full';
-  if (meals.includes(id + HALF)) return 'half';
+export function slotState(list: string[], id: string): SlotState {
+  if (list.includes(id)) return 'full';
+  if (list.includes(id + HALF)) return 'half';
   return 'empty';
 }
 
-/** Tapping a meal steps empty -> full -> half -> empty. */
-function cycleMeal(meals: string[], id: string): string[] {
-  const rest = meals.filter((x) => x !== id && x !== id + HALF);
-  switch (mealState(meals, id)) {
+/** Tapping a slot steps empty -> full -> half -> empty. */
+function cycleSlot(list: string[], id: string): string[] {
+  const rest = list.filter((x) => x !== id && x !== id + HALF);
+  switch (slotState(list, id)) {
     case 'empty': return [...rest, id];
     case 'full': return [...rest, id + HALF];
     case 'half': return rest;
@@ -121,14 +121,7 @@ export function useDayLog() {
   const toggle = useCallback(
     (field: 'activities' | 'meals', id: string) => {
       const prev = readDay(date);
-      const list = prev[field];
-      writeDay(date, {
-        ...prev,
-        [field]:
-          field === 'meals'
-            ? cycleMeal(list, id)
-            : list.includes(id) ? list.filter((x) => x !== id) : [...list, id],
-      });
+      writeDay(date, { ...prev, [field]: cycleSlot(prev[field], id) });
     },
     [date],
   );

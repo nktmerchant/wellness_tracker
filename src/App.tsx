@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from 'react';
-import SaveNotice, { AccountPill, LoadFailed, Loading, NotConfigured, SignIn } from './Account';
-import ShareButton from './ShareButton';
+import SaveNotice, { AccountMenu, LoadFailed, Loading, NotConfigured, SignIn } from './Account';
+import SettingsModal from './SettingsModal';
 import { getStatus, subscribeStatus } from './sync';
 import TriangleNodes from './TriangleNodes';
 import TrendsModal from './TrendsModal';
@@ -28,6 +28,7 @@ function Tracker() {
   const { date, log, toggle, setSleepHours, goDays, canGoBack, canGoForward } = useDayLog();
   const frame = FRAMES[useCompact() ? 'compact' : 'wide'];
   const [trendsOpen, setTrendsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [trendsWeek, setTrendsWeek] = useState(() => startOfWeek(todayISO()));
 
   /* Set the week from the event that opens the view, not from an effect. */
@@ -61,10 +62,9 @@ function Tracker() {
         onWeekStart={setTrendsWeek}
         onClose={() => setTrendsOpen(false)}
       />
-      <AccountPill />
-      {/* Stacked, so a save warning never lands on top of the share pill. */}
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <AccountMenu date={date} onOpenSettings={() => setSettingsOpen(true)} />
       <div className="corner-right">
-        <ShareButton date={date} />
         <SaveNotice />
       </div>
     </main>

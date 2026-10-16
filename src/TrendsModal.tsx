@@ -2,12 +2,13 @@ import { useEffect, useRef } from 'react';
 import { useCompact } from './useCompact';
 import Icon from './Icon';
 import { HalfFill } from './TriangleNodes';
+import { exercisesOn, useExerciseHistory, type Exercise } from './exercises';
 import { NODES, type NodeSpec, type Slot } from './geometry';
 import {
   FIRST_DAY,
   WEEKDAY_INITIALS,
   formatShortDay,
-  mealState,
+  slotState,
   readDay,
   useLogVersion,
   startOfWeek,
@@ -279,8 +280,14 @@ function Lane({
  * odd count a disc sits on the line itself.
  */
 function ExerciseLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[]; r: number }) {
-  if (node.reveal.kind === 'dial') return null;
-  const slots = node.reveal.slots;
+  /* Every exercise the week logged, in the week's last ring order. */
+  const history = useExerciseHistory();
+  const slots: Exercise[] = [];
+  for (const d of [...days].reverse()) {
+    for (const e of exercisesOn(history, d.date, d.log.activities)) {
+      if (!slots.includes(e)) slots.push(e);
+    }
+  }
   const spine = TITLE_H + PLOT_H / 2;
   const step = 2 * r + STACK_GAP;
 
@@ -288,7 +295,7 @@ function ExerciseLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day
     day,
     x: g.colX(i),
     /* Slot order, not click order, so a day's stack never reshuffles. */
-    done: day.future ? [] : slots.filter((s) => day.log.activities.includes(s.id)),
+    done: day.future ? [] : slots.filter((s) => slotState(day.log.activities, s.id) !== 'empty'),
   }));
 
   /* Runs break at missed days AND at days not yet reached. */
@@ -314,6 +321,7 @@ function ExerciseLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day
       color={node.color}
       label={`on ${count} of ${elapsed} days so far, ${sessions} sessions`}
     >
+      <HalfFill id="trend-half-exercise" color={node.color} />
       {segments.map((seg) => (
         <polyline key={seg[0]} className="line" points={seg.map((x) => `${x},${spine}`).join(' ')} />
       ))}
@@ -329,11 +337,23 @@ function ExerciseLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day
         ) : (
           done.map((slot: Slot, k) => {
             const y = spine + (k - (done.length - 1) / 2) * step;
+            const half = slotState(day.log.activities, slot.id) === 'half';
             return (
               <g key={`${day.date}-${slot.id}`}>
-                <title>{`${formatShortDay(day.date)}: ${slot.label}`}</title>
-                <circle className="cell is-on" cx={x} cy={y} r={r} />
-                <Icon name={slot.icon} at={{ x, y }} box={r * 1.5} className="cell-icon" />
+                <title>{`${formatShortDay(day.date)}: ${slot.label}${half ? ' (half)' : ''}`}</title>
+                <circle
+                  className={`cell ${half ? 'is-half' : 'is-on'}`}
+                  cx={x}
+                  cy={y}
+                  r={r}
+                  style={{ '--half-fill': 'url(#trend-half-exercise)' } as React.CSSProperties}
+                />
+                <Icon
+                  name={slot.icon}
+                  at={{ x, y }}
+                  box={r * 1.5}
+                  className={`cell-icon${half ? ' is-half' : ''}`}
+                />
               </g>
             );
           })
@@ -365,7 +385,7 @@ function MealsLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[];
             {slot.label}
           </text>
           {days.map((day, c) => {
-            const meal = mealState(day.log.meals, slot.id);
+            const meal = slotState(day.log.meals, slot.id);
             const state = day.future
               ? 'is-future'
               : meal === 'full' ? 'is-on' : meal === 'half' ? 'is-half' : 'is-off';
@@ -451,6 +471,7 @@ function SleepLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[];
         </g>
       ))}
 
+      <HalfFill id="trend-half-exercise" color={node.color} />
       {segments.map((seg) => (
         <polyline key={seg[0].date} className="line" points={seg.map((p) => `${p.x},${p.y}`).join(' ')} />
       ))}

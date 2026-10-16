@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ARROW_HALF_H,
   ARROW_HALF_W,
@@ -15,7 +15,7 @@ import {
   ICON_BOX,
   NODE_HOVER_SCALE,
   NODE_R,
-  NODES,
+  nodesWith,
   PILL_H,
   capsuleRect,
   chevron,
@@ -46,7 +46,8 @@ import {
   type Slot,
 } from './geometry';
 import Icon from './Icon';
-import { formatDay, mealState, type DayLog, type MealState } from './useDayLog';
+import { MAX_EXERCISES, exercisesOn, useExerciseHistory } from './exercises';
+import { formatDay, slotState, type DayLog, type SlotState } from './useDayLog';
 
 type Props = {
   frame: Frame;
@@ -90,6 +91,12 @@ export default function TriangleNodes({
 }: Props) {
   /* The node opened by a tap. Mouse hover is tracked inside each node. */
   const [tapped, setTapped] = useState<NodeSpec['id'] | null>(null);
+  /* The ring is the shown day's own picks, so it changes as days are paged. */
+  const history = useExerciseHistory();
+  const nodes = useMemo(
+    () => nodesWith(exercisesOn(history, date, log.activities).slice(0, MAX_EXERCISES)),
+    [history, date, log.activities],
+  );
 
   /* A tap outside every node closes the open one. The document is an
      external system, hence the effect. */
@@ -124,7 +131,7 @@ export default function TriangleNodes({
       role="group"
       aria-label={`Daily log for ${formatDay(date)}: exercise, sleep and eating`}
     >
-      {NODES.map((node) =>
+      {nodes.map((node) =>
         node.reveal.kind === 'dial' ? (
           <DialNode
             key={node.id}
@@ -140,11 +147,7 @@ export default function TriangleNodes({
             {...tapProps(node.id)}
             node={node}
             slots={node.reveal.slots}
-            stateOf={(id) =>
-              node.id === 'exercise'
-                ? log.activities.includes(id) ? 'full' : 'empty'
-                : mealState(log.meals, id)
-            }
+            stateOf={(id) => slotState(node.id === 'exercise' ? log.activities : log.meals, id)}
             onToggle={(id) => onToggle(node.id === 'exercise' ? 'activities' : 'meals', id)}
           />
         ),
@@ -298,7 +301,7 @@ function NodeShell({
 
 /**
  * One satellite: a tappable checkbox for a slot, which on hover unfurls a
- * plaque carrying its icon and name. Meals can also be half logged, which
+ * plaque carrying its icon and name. A slot can also be half logged, which
  * fills the lower half (aria "mixed").
  */
 function SatelliteSlot({
@@ -318,7 +321,7 @@ function SatelliteSlot({
   at: Pt;
   angle: number;
   index: number;
-  state: MealState;
+  state: SlotState;
   /** Plaque open: mouse over it, or keyboard focus. Never from a tap. */
   hot: boolean;
   onToggle: () => void;
@@ -433,7 +436,7 @@ function SlotNode({
 }: Tap & {
   node: NodeSpec;
   slots: Slot[];
-  stateOf: (id: string) => MealState;
+  stateOf: (id: string) => SlotState;
   onToggle: (id: string) => void;
 }) {
   const [hovered, setHovered] = useState<string | null>(null);

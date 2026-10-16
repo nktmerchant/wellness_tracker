@@ -8,10 +8,13 @@
  * refresh that raced it. While the app is open, a Realtime subscription
  * brings in edits from the user's other devices as they're saved; reloading
  * on return to the foreground covers anything missed while the connection
- * was down. The app needs the network: there is no copy on the
+ * was down. The exercise picks are a setting on the account itself (its
+ * user metadata), saved alongside the days and read on every load. The app
+ * needs the network: there is no copy on the
  * device, and a failed save is shown and retried, not queued for later.
  */
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
+import { applyServerExercises, exerciseHistory, onExercisesEdit } from './exercises';
 import { applyServer, applyServerDay, clearDays, onEdit, readDay } from './store';
 import type { DayLog } from './useDayLog';
 
@@ -40,7 +43,8 @@ export type Status = {
   loadError: string | null;
   save: 'saved' | 'saving' | 'error';
   saveError: string | null;
-  /** Days edited on screen that the server hasn't confirmed yet. */
+  /** Days (and the exercise setting) edited on screen that the server
+      hasn't confirmed yet. */
   pending: number;
 };
 
@@ -103,9 +107,11 @@ export async function load(): Promise<void> {
   const uid = userId;
   if (blocking) setStatus({ load: 'loading', loadError: null });
   try {
-    const rows = await fetchAll();
+    const [rows, user] = await Promise.all([fetchAll(), supabase!.auth.getUser()]);
     if (uid !== userId) return; // signed out or switched while loading
     applyServer(rows, new Set(pending.keys()));
+    /* Picks changed on another device arrive here; an unsaved edit wins. */
+    if (!settingsEdits && user.data.user) applyServerExercises(user.data.user.user_metadata.exerciseHistory);
     if (blocking) setStatus({ load: 'ready' });
   } catch (e) {
     if (blocking && uid === userId) setStatus({ load: 'error', loadError: message(e) });
@@ -116,21 +122,37 @@ export async function load(): Promise<void> {
 
 /** Unsaved days, each with a count of edits so far. */
 const pending = new Map<string, number>();
+/** Unsaved edits to the exercise picks, counted the same way. */
+let settingsEdits = 0;
+
+const unsaved = () => pending.size + (settingsEdits ? 1 : 0);
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
 let saving = false;
 let saveAgain = false;
 
 function queueSave(date: string) {
   pending.set(date, (pending.get(date) ?? 0) + 1);
-  setStatus({ pending: pending.size, save: status.save === 'error' ? 'error' : 'saving' });
+  scheduleSave();
+}
+
+function queueSettingsSave() {
+  settingsEdits++;
+  scheduleSave();
+}
+
+function scheduleSave() {
+  setStatus({ pending: unsaved(), save: status.save === 'error' ? 'error' : 'saving' });
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => void save(), 800);
 }
 
-/** Saves every pending day in one request. Overlapping calls collapse. */
+/**
+ * Saves every pending day in one request, and the exercise picks in another
+ * if they changed. Overlapping calls collapse.
+ */
 export async function save(): Promise<void> {
   clearTimeout(saveTimer);
-  if (!supabase || pending.size === 0) return;
+  if (!supabase || unsaved() === 0) return;
   if (saving) {
     saveAgain = true;
     return;
@@ -148,23 +170,34 @@ export async function save(): Promise<void> {
     };
     return { day, edits, row };
   });
+  const settingsSent = settingsEdits;
   setStatus({ save: 'saving' });
   try {
-    const { error } = await supabase
-      .from('day_logs')
-      .upsert(sent.map((s) => s.row), { onConflict: 'user_id,day' });
-    if (error) throw error;
+    if (sent.length) {
+      const { error } = await supabase
+        .from('day_logs')
+        .upsert(sent.map((s) => s.row), { onConflict: 'user_id,day' });
+      if (error) throw error;
+    }
+    if (settingsSent) {
+      /* `exercises` was a single list, from before picks were dated. */
+      const { error } = await supabase.auth.updateUser({
+        data: { exerciseHistory: exerciseHistory(), exercises: null },
+      });
+      if (error) throw error;
+    }
     if (uid !== userId) return;
-    /* A day edited again while the request was in flight stays pending. */
+    /* Anything edited again while the request was in flight stays pending. */
     for (const { day, edits } of sent) {
       if (pending.get(day) === edits) pending.delete(day);
     }
-    setStatus({ save: 'saved', saveError: null, pending: pending.size });
+    if (settingsEdits === settingsSent) settingsEdits = 0;
+    setStatus({ save: 'saved', saveError: null, pending: unsaved() });
   } catch (e) {
     if (uid === userId) setStatus({ save: 'error', saveError: message(e) });
   } finally {
     saving = false;
-    if (saveAgain || (pending.size > 0 && status.save !== 'error')) {
+    if (saveAgain || (unsaved() > 0 && status.save !== 'error')) {
       saveAgain = false;
       void save();
     }
@@ -244,7 +277,10 @@ export function startSync(): void {
     unsubscribe();
     clearTimeout(saveTimer);
     pending.clear();
+    settingsEdits = 0;
     clearDays();
+    /* The saved picks ride along with the session; signed out, the defaults. */
+    applyServerExercises(session?.user.user_metadata.exerciseHistory);
     setStatus({
       auth: uid ? 'signed-in' : 'signed-out',
       email: session?.user.email ?? null,
@@ -264,6 +300,7 @@ export function startSync(): void {
   });
 
   onEdit(queueSave);
+  onExercisesEdit(queueSettingsSave);
 
   const retry = () => {
     if (status.auth !== 'signed-in') return;
@@ -277,6 +314,6 @@ export function startSync(): void {
     else retry();
   });
   window.addEventListener('beforeunload', (e) => {
-    if (pending.size > 0) e.preventDefault();
+    if (unsaved() > 0) e.preventDefault();
   });
 }

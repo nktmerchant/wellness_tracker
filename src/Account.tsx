@@ -1,4 +1,6 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { ICONS, type IconName } from './icons';
+import { dayShare, sendShare } from './share';
 import { getStatus, load, save, signIn, signOut, subscribeStatus } from './sync';
 
 /**
@@ -19,35 +21,118 @@ export default function SaveNotice() {
   );
 }
 
+/** How long "Copied" shows before the menu closes. */
+const CONFIRM_MS = 1800;
+
 /**
- * Who's signed in, as a quiet pill in the top-left corner. Tapping it offers
- * the way out, so a stray tap can't sign anyone out.
+ * Who's signed in, as a quiet pill in the top-left corner. Tapping it opens a
+ * small menu: share the shown day, open settings, or log out. Logging out sits behind the
+ * tap, so a stray one can't sign anyone out.
  */
-export function AccountPill() {
+export function AccountMenu({ date, onOpenSettings }: { date: string; onOpenSettings: () => void }) {
   const status = useSyncExternalStore(subscribeStatus, getStatus);
   const [open, setOpen] = useState(false);
+  const [done, setDone] = useState<'Copied' | 'Shared' | "Couldn't copy" | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  /* Outside taps and Escape close it, as any menu would. */
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('pointerdown', away);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [open]);
+
+  /* A timer is an external system: this only clears the confirmation. */
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => {
+      setDone(null);
+      setOpen(false);
+    }, CONFIRM_MS);
+    return () => clearTimeout(t);
+  }, [done]);
+
   return (
-    <div className={`account-pill${open ? ' is-open' : ''}`}>
-      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}>
-        {status.email}
+    <div ref={ref} className={`account-menu${open ? ' is-open' : ''}`}>
+      <button
+        type="button"
+        className="account-pill"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        <span className="account-email">{status.email}</span>
+        <svg className="account-caret" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="M 3 4.5 L 6 7.5 L 9 4.5" />
+        </svg>
       </button>
       {open && (
-        <button
-          type="button"
-          className="account-signout"
-          onClick={() => {
-            if (
-              status.pending &&
-              !confirm('Some changes haven’t been saved yet and will be lost. Sign out anyway?')
-            )
-              return;
-            void signOut();
-          }}
-        >
-          Sign out
-        </button>
+        <div className="account-list" role="menu">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              /* The text is built at the tap, so it is the day on screen. */
+              sendShare(dayShare(date)).then(
+                (r) => (r ? setDone(r === 'shared' ? 'Shared' : 'Copied') : setOpen(false)),
+                () => setDone("Couldn't copy"),
+              );
+            }}
+          >
+            <MenuIcon name="share" />
+            <span aria-live="polite">{done ?? 'Share'}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onOpenSettings();
+            }}
+          >
+            <MenuIcon name="settings" />
+            <span>Settings</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              if (
+                status.pending &&
+                !confirm('Some changes haven’t been saved yet and will be lost. Log out anyway?')
+              )
+                return;
+              void signOut();
+            }}
+          >
+            <MenuIcon name="logOut" />
+            <span>Log out</span>
+          </button>
+        </div>
       )}
     </div>
+  );
+}
+
+/** A menu icon from icons.ts, sized by CSS like the text beside it. */
+function MenuIcon({ name }: { name: IconName }) {
+  const icon = ICONS[name];
+  return (
+    <svg
+      className="menu-icon"
+      viewBox={`0 0 ${icon.w} ${icon.h}`}
+      aria-hidden="true"
+      /* Build-time constant from icons.ts, never user input. */
+      dangerouslySetInnerHTML={{ __html: icon.body }}
+    />
   );
 }
 

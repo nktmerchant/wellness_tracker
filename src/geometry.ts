@@ -3,6 +3,7 @@
  * The pane scales its viewBox to the container, so every number below is
  * resolution-independent — tweak these and the whole figure follows.
  */
+import { CATALOG, DEFAULT_EXERCISES, MAX_EXERCISES, exerciseById } from './exercises';
 import type { IconName } from './icons';
 
 /**
@@ -163,10 +164,10 @@ export type Reveal =
    */
   | { kind: 'fan'; slots: Slot[]; spacingDeg: number; axisDeg?: number }
   /**
-   * Slots spaced evenly around the full circle, anchored at the node's outward
-   * axis plus `phaseDeg`.
+   * Slots in fixed places around the full circle, filled clockwise (see
+   * ringAngles).
    */
-  | { kind: 'ring'; slots: Slot[]; phaseDeg?: number }
+  | { kind: 'ring'; slots: Slot[] }
   /**
    * A bezeled arc dragged to set a single value. `axisDeg` defaults to the
    * node's outward axis; setting it swings the arc elsewhere.
@@ -205,27 +206,8 @@ export const NODES: NodeSpec[] = [
     outward: 90,
     color: '#e03131',
     icon: 'exercise',
-    reveal: {
-      kind: 'ring',
-      /*
-       * Half of the 45deg step. Without it a slot lands on the vertical axis,
-       * where it has no horizontal side to unfurl into: the plaque falls back
-       * to one side and clips a diagonal neighbour. Offsetting by half a step
-       * keeps every slot clearly left or right of center, so the eight split
-       * four plaques down each side.
-       */
-      phaseDeg: 22.5,
-      slots: [
-        { id: 'ski', label: 'Ski', icon: 'ski' },
-        { id: 'run', label: 'Run', icon: 'run' },
-        { id: 'bike', label: 'Bike', icon: 'bike' },
-        { id: 'climb', label: 'Climb', icon: 'climb' },
-        { id: 'surf', label: 'Surf', icon: 'surf' },
-        { id: 'strength', label: 'Strength', icon: 'strength' },
-        { id: 'core', label: 'Core', icon: 'core' },
-        { id: 'meditate', label: 'Meditate', icon: 'meditate' },
-      ],
-    },
+    /* The defaults; nodesWith swaps in the person's own picks. */
+    reveal: { kind: 'ring', slots: DEFAULT_EXERCISES.map((id) => exerciseById(id)!) },
   },
   {
     id: 'meals',
@@ -281,22 +263,41 @@ export const NODES: NodeSpec[] = [
  * the triangle centroid by construction. A fan with an explicit `axisDeg`
  * trades that property away for a different arrangement.
  *
- * A `ring` divides 360deg evenly, anchored at the outward axis plus its
- * `phaseDeg`, so the arrangement stays visually tied to the triangle.
+ * A `ring` fills eight fixed places clockwise from just off the outward
+ * axis, so the arrangement stays visually tied to the triangle.
  */
 export function satelliteAngles(node: NodeSpec): number[] {
   const { reveal, outward } = node;
-  if (reveal.kind === 'ring') {
-    const n = reveal.slots.length;
-    const phase = reveal.phaseDeg ?? 0;
-    return reveal.slots.map((_, i) => outward + phase + (i * 360) / n);
-  }
+  if (reveal.kind === 'ring') return ringAngles(outward, reveal.slots.length);
   if (reveal.kind === 'fan') {
     const axis = reveal.axisDeg ?? outward;
     const mid = (reveal.slots.length - 1) / 2;
     return reveal.slots.map((_, i) => axis + (i - mid) * reveal.spacingDeg);
   }
   return [];
+}
+
+/**
+ * A ring has eight fixed places, whatever is in them, so a slot never moves
+ * when another is added or removed. They are filled clockwise like a clock
+ * hand, from the place just right of the outward axis.
+ *
+ * Every place is half a step off that axis. A slot on the vertical axis has
+ * no horizontal side to unfurl into: its plaque falls back to one side and
+ * clips a diagonal neighbour. Half a step keeps every slot clearly left or
+ * right of center, so the eight split four plaques down each side.
+ */
+const RING_STEP = 360 / MAX_EXERCISES;
+
+function ringAngles(outward: number, n: number): number[] {
+  return Array.from({ length: n }, (_, i) => outward - RING_STEP / 2 - i * RING_STEP);
+}
+
+/** The figure's nodes, with the exercise ring holding the person's picks. */
+export function nodesWith(exercises: Slot[]): NodeSpec[] {
+  return NODES.map((n) =>
+    n.reveal.kind === 'ring' ? { ...n, reveal: { ...n.reveal, slots: exercises } } : n,
+  );
 }
 
 /* ---- plaque geometry ---- */
@@ -393,6 +394,27 @@ type BoxOpts = {
 function nodeBox(node: NodeSpec, o: BoxOpts): Box {
   const c = polar({ x: 0, y: 0 }, TRIANGLE_R, node.outward);
   const boxes: Box[] = [around(c, NODE_R * NODE_HOVER_SCALE + STROKE / 2)];
+
+  /*
+   * The ring holds whatever the person picked, and the frame shouldn't jump
+   * when they change it. So it reserves all eight places, each carrying the
+   * longest name in the catalog.
+   */
+  if (node.reveal.kind === 'ring') {
+    const longest = CATALOG.reduce((a, b) => (b.label.length > a.label.length ? b : a)).label;
+    for (const deg of ringAngles(node.outward, MAX_EXERCISES)) {
+      const at = polar(c, SAT_ORBIT, deg);
+      boxes.push(around(at, (SAT_R + STROKE / 2) * o.satK));
+      if (!o.pills) continue;
+      const r = pillRect(at, longest, pillDirection(node, deg));
+      const pad = STROKE / 2;
+      boxes.push({
+        minX: r.x - pad, maxX: r.x + r.w + pad,
+        minY: r.y - pad, maxY: r.y + r.h + pad,
+      });
+    }
+    return union(boxes);
+  }
 
   const angles = satelliteAngles(node);
   if (node.reveal.kind !== 'dial') {

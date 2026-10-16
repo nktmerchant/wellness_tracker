@@ -3,21 +3,14 @@
  * dot in the node's colour, with a short emoji list under each. Everything is
  * emoji or plain text, so it survives any chat app.
  */
+import { exerciseHistory, exercisesOn } from './exercises';
 import { NODES, type Slot } from './geometry';
-import { mealState, readDay } from './useDayLog';
+import { slotState, readDay } from './useDayLog';
 
 const LINK = 'https://nktmerchant.github.io/wellness_tracker/';
 
-/** Each slot's emoji, chosen to echo its icon in the figure. */
+/** Each meal's emoji, chosen to echo its icon. Exercises carry their own. */
 const EMOJI: Record<string, string> = {
-  ski: '⛷️',
-  run: '🏃',
-  bike: '🚴',
-  climb: '🧗',
-  surf: '🏄',
-  strength: '🏋️',
-  core: '🤸',
-  meditate: '🧘',
   breakfast: '☕',
   midMorning: '🍎',
   lunch: '🍔',
@@ -31,6 +24,7 @@ const EMOJI: Record<string, string> = {
  */
 const INDENT = '  ';
 const NONE = '⬜';
+const DONE = '🟥';
 const MEAL = '🟦';
 const HOUR = '🟩';
 
@@ -49,33 +43,15 @@ function sleepMax(): number {
 }
 
 /**
- * Text widths in the system font, which is what the reader most likely sees
- * too (an iPhone sending to an iPhone). Only used to line up the meal boxes,
- * so a different font on the other end costs a dot or two of alignment.
- */
-let ctx: CanvasRenderingContext2D | null | undefined;
-function textWidth(s: string): number {
-  if (ctx === undefined) {
-    ctx = document.createElement('canvas').getContext('2d');
-    if (ctx) ctx.font = '17px -apple-system, system-ui, "Segoe UI", Roboto, sans-serif';
-  }
-  return ctx ? ctx.measureText(s).width : s.length * 9;
-}
-
-/**
- * Meal lines end in a two-box meter. Names differ in width, so each is padded
- * with middle dots out to a shared edge; dots are narrow, which lets the
- * boxes land within about a dot of each other even in a proportional font.
+ * Meal lines lead with a two-box meter. Emoji are about the same width in
+ * any font, so leading with them keeps the boxes lined up wherever the text
+ * lands; the names, which vary, trail off to the right.
  */
 function mealLines(meals: string[]): string[] {
-  const slots = slotsOf('meals');
-  const dot = textWidth('·');
-  const edge = Math.max(...slots.map((s) => textWidth(s.label))) + 3 * dot;
-  return slots.map((s) => {
-    const dots = Math.max(2, Math.round((edge - textWidth(s.label)) / dot));
-    const st = mealState(meals, s.id);
+  return slotsOf('meals').map((s) => {
+    const st = slotState(meals, s.id);
     const boxes = st === 'full' ? MEAL + MEAL : st === 'half' ? MEAL + NONE : NONE + NONE;
-    return `${INDENT}${EMOJI[s.id]} ${s.label} ${'·'.repeat(dots)} ${boxes}`;
+    return `${INDENT}${boxes} ${EMOJI[s.id]} ${s.label}`;
   });
 }
 
@@ -100,10 +76,13 @@ export function dayShare(date: string): string {
   const log = readDay(date);
 
   /* Slot order, not tap order, so the same day always reads the same. */
-  const done = slotsOf('exercise').filter((s) => log.activities.includes(s.id));
+  const done = exercisesOn(exerciseHistory(), date, log.activities).filter((s) => slotState(log.activities, s.id) !== 'empty');
   const exercise = done.length
-    ? done.map((s) => `${INDENT}${EMOJI[s.id]} ${s.label}`)
-    : [`${INDENT}🛋️ Rest day`];
+    ? done.map((s) => {
+        const boxes = slotState(log.activities, s.id) === 'full' ? DONE + DONE : DONE + NONE;
+        return `${INDENT}${boxes} ${s.emoji} ${s.label}`;
+      })
+    : [`${INDENT}${NONE}${NONE} 🛋️ Rest day`];
 
   return [
     title(date),
@@ -126,7 +105,7 @@ export function dayShare(date: string): string {
  * the clipboard elsewhere, as Wordle does. Resolves to what happened, or
  * null when the person dismissed the share sheet.
  */
-export const SHARE_SHEET = window.matchMedia('(pointer: coarse)').matches && !!navigator.share;
+const SHARE_SHEET = window.matchMedia('(pointer: coarse)').matches && !!navigator.share;
 
 export async function sendShare(text: string): Promise<'shared' | 'copied' | null> {
   if (SHARE_SHEET) {
