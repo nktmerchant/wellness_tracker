@@ -31,7 +31,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
     if (!open && el.open) el.close();
   }, [open]);
 
-  /* Added to the end, so the ring fills in the order they were ticked. The
+  /* The ring keeps catalog order, whatever order they're ticked in. The
      last one can't be unticked: the node needs something to tap. */
   const toggle = (id: string) => {
     if (ids.includes(id)) {

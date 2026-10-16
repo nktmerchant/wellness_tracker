@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useCompact } from './useCompact';
 import Icon from './Icon';
 import { HalfFill } from './TriangleNodes';
-import { exercisesOn, useExerciseHistory, type Exercise } from './exercises';
+import { CATALOG, exercisesOn, useExerciseHistory } from './exercises';
 import { NODES, type NodeSpec, type Slot } from './geometry';
 import {
   FIRST_DAY,
@@ -280,14 +280,10 @@ function Lane({
  * odd count a disc sits on the line itself.
  */
 function ExerciseLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[]; r: number }) {
-  /* Every exercise the week logged, in the week's last ring order. */
+  /* Every exercise the week offered or logged, in catalog order. */
   const history = useExerciseHistory();
-  const slots: Exercise[] = [];
-  for (const d of [...days].reverse()) {
-    for (const e of exercisesOn(history, d.date, d.log.activities)) {
-      if (!slots.includes(e)) slots.push(e);
-    }
-  }
+  const seen = new Set(days.flatMap((d) => exercisesOn(history, d.date, d.log.activities)));
+  const slots = CATALOG.filter((e) => seen.has(e));
   const spine = TITLE_H + PLOT_H / 2;
   const step = 2 * r + STACK_GAP;
 

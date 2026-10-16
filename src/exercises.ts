@@ -16,7 +16,10 @@ export const GROUPS = ['Cardio', 'Outdoors', 'Gym & studio', 'Sports'] as const;
 /** A slot, plus the emoji it is shared as and where settings lists it. */
 export type Exercise = Slot & { emoji: string; group: (typeof GROUPS)[number] };
 
-/* Ids are stored in day logs, so an existing id never changes. */
+/*
+ * Ids are stored in day logs, so an existing id never changes. The order
+ * here is canonical: the ring, trends and sharing all list exercises in it.
+ */
 export const CATALOG: Exercise[] = [
   { id: 'run', label: 'Run', icon: 'run', emoji: '🏃', group: 'Cardio' },
   { id: 'bike', label: 'Bike', icon: 'bike', emoji: '🚴', group: 'Cardio' },
@@ -50,21 +53,24 @@ export const CATALOG: Exercise[] = [
 /** The ring around the node has room for eight. */
 export const MAX_EXERCISES = 8;
 
-/** The original eight, in their original order, for anyone who hasn't chosen. */
-export const DEFAULT_EXERCISES = ['ski', 'run', 'bike', 'climb', 'surf', 'strength', 'core', 'meditate'];
+/** The original eight, for anyone who hasn't chosen. */
+export const DEFAULT_EXERCISES = ['run', 'bike', 'ski', 'surf', 'climb', 'strength', 'core', 'meditate'];
 
 const BY_ID = new Map(CATALOG.map((e) => [e.id, e]));
+const RANK = new Map(CATALOG.map((e, i) => [e.id, i]));
 
 export const exerciseById = (id: string): Exercise | undefined => BY_ID.get(id);
 
 /**
  * A saved list made safe to use: known ids only, no repeats, at most eight,
- * and never empty, since a node with nothing to tap is no use. Anything else
- * (a missing or mangled setting) falls back to the defaults.
+ * in catalog order, and never empty, since a node with nothing to tap is no
+ * use. Anything else (a missing or mangled setting) falls back to the
+ * defaults. Sorting here also puts lists saved in tick order into line.
  */
 export function cleanExercises(ids: unknown): string[] {
   if (!Array.isArray(ids)) return DEFAULT_EXERCISES;
   const out = [...new Set(ids.filter((x): x is string => typeof x === 'string' && BY_ID.has(x)))];
+  out.sort((a, b) => RANK.get(a)! - RANK.get(b)!);
   return out.length ? out.slice(0, MAX_EXERCISES) : DEFAULT_EXERCISES;
 }
 
@@ -142,8 +148,7 @@ export function onExercisesEdit(l: () => void): () => void {
 export const exerciseHistory = () => history;
 
 /**
- * A day's exercises: what was picked that day, in ring order, then any others
- * it logged. Those can only come from editing the picks after logging the
+ * A day's exercises: what was picked that day, then any others it logged. Those can only come from editing the picks after logging the
  * same day, and they keep the entry visible rather than hidden.
  */
 export function exercisesOn(h: Version[], date: string, activities: string[]): Exercise[] {
