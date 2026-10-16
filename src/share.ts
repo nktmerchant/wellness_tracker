@@ -4,7 +4,8 @@
  * emoji or plain text, so it survives any chat app.
  */
 import { exerciseHistory, exercisesOn } from './exercises';
-import { NODES, type Slot } from './geometry';
+import { NODES } from './geometry';
+import { mealHistory, mealsOn } from './meals';
 import { slotState, readDay } from './useDayLog';
 
 const LINK = 'https://nktmerchant.github.io/wellness_tracker/';
@@ -15,7 +16,7 @@ const EMOJI: Record<string, string> = {
   midMorning: '🍎',
   lunch: '🍔',
   dinner: '🍽️',
-  supper: '🍜',
+  supper: '🍪',
 };
 
 /*
@@ -32,11 +33,6 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 const MONTHS = ['Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.',
                 'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'];
 
-function slotsOf(id: string): Slot[] {
-  const n = NODES.find((x) => x.id === id)!;
-  return n.reveal.kind === 'dial' ? [] : n.reveal.slots;
-}
-
 function sleepMax(): number {
   const n = NODES.find((x) => x.id === 'sleep')!;
   return n.reveal.kind === 'dial' ? n.reveal.max : 9;
@@ -47,8 +43,8 @@ function sleepMax(): number {
  * any font, so leading with them keeps the boxes lined up wherever the text
  * lands; the names, which vary, trail off to the right.
  */
-function mealLines(meals: string[]): string[] {
-  return slotsOf('meals').map((s) => {
+function mealLines(date: string, meals: string[]): string[] {
+  return mealsOn(mealHistory(), date, meals).map((s) => {
     const st = slotState(meals, s.id);
     const boxes = st === 'full' ? MEAL + MEAL : st === 'half' ? MEAL + NONE : NONE + NONE;
     return `${INDENT}${boxes} ${EMOJI[s.id]} ${s.label}`;
@@ -91,7 +87,7 @@ export function dayShare(date: string): string {
     ...exercise,
     '',
     '🔵 Eating',
-    ...mealLines(log.meals),
+    ...mealLines(date, log.meals),
     '',
     '🟢 Sleep',
     sleepLine(log.sleepHours),

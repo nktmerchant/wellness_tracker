@@ -622,6 +622,9 @@ body {
   stroke-width: 3px;
 }
 
+/* A night with no hours logged: a placeholder, not a value. */
+.point.is-pending { fill: var(--unset); }
+
 .axis-dow {
   fill: var(--outline);
   font-size: 14px;
@@ -740,8 +743,14 @@ body {
   width: 15px;
   height: 15px;
   margin: 0;
-  accent-color: #e03131;
+  accent-color: var(--accent, #e03131);
   cursor: inherit;
+}
+
+/* Each section ticks in its node's colour. */
+.settings-meals {
+  --accent: #1971c2;
+  margin-top: 22px;
 }
 
 /* Full up: the unticked rest recede until one is unticked. */

@@ -8,13 +8,14 @@
  * refresh that raced it. While the app is open, a Realtime subscription
  * brings in edits from the user's other devices as they're saved; reloading
  * on return to the foreground covers anything missed while the connection
- * was down. The exercise picks are a setting on the account itself (its
+ * was down. The exercise and meal picks are settings on the account itself (its
  * user metadata), saved alongside the days and read on every load. The app
  * needs the network: there is no copy on the
  * device, and a failed save is shown and retried, not queued for later.
  */
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
 import { applyServerExercises, exerciseHistory, onExercisesEdit } from './exercises';
+import { applyServerMeals, mealHistory, onMealsEdit } from './meals';
 import { applyServer, applyServerDay, clearDays, onEdit, readDay } from './store';
 import type { DayLog } from './useDayLog';
 
@@ -43,7 +44,7 @@ export type Status = {
   loadError: string | null;
   save: 'saved' | 'saving' | 'error';
   saveError: string | null;
-  /** Days (and the exercise setting) edited on screen that the server
+  /** Days (and the picks settings) edited on screen that the server
       hasn't confirmed yet. */
   pending: number;
 };
@@ -111,7 +112,7 @@ export async function load(): Promise<void> {
     if (uid !== userId) return; // signed out or switched while loading
     applyServer(rows, new Set(pending.keys()));
     /* Picks changed on another device arrive here; an unsaved edit wins. */
-    if (!settingsEdits && user.data.user) applyServerExercises(user.data.user.user_metadata.exerciseHistory);
+    if (!settingsEdits && user.data.user) applyServerPicks(user.data.user.user_metadata);
     if (blocking) setStatus({ load: 'ready' });
   } catch (e) {
     if (blocking && uid === userId) setStatus({ load: 'error', loadError: message(e) });
@@ -122,7 +123,7 @@ export async function load(): Promise<void> {
 
 /** Unsaved days, each with a count of edits so far. */
 const pending = new Map<string, number>();
-/** Unsaved edits to the exercise picks, counted the same way. */
+/** Unsaved edits to the exercise and meal picks, counted the same way. */
 let settingsEdits = 0;
 
 const unsaved = () => pending.size + (settingsEdits ? 1 : 0);
@@ -147,7 +148,7 @@ function scheduleSave() {
 }
 
 /**
- * Saves every pending day in one request, and the exercise picks in another
+ * Saves every pending day in one request, and the picks in another
  * if they changed. Overlapping calls collapse.
  */
 export async function save(): Promise<void> {
@@ -182,7 +183,7 @@ export async function save(): Promise<void> {
     if (settingsSent) {
       /* `exercises` was a single list, from before picks were dated. */
       const { error } = await supabase.auth.updateUser({
-        data: { exerciseHistory: exerciseHistory(), exercises: null },
+        data: { exerciseHistory: exerciseHistory(), mealHistory: mealHistory(), exercises: null },
       });
       if (error) throw error;
     }
@@ -259,6 +260,12 @@ export async function signOut(): Promise<void> {
 
 /* ---- wiring ---- */
 
+/** The saved picks from the account's metadata; missing ones fall back to the defaults. */
+function applyServerPicks(meta: Record<string, unknown> | undefined): void {
+  applyServerExercises(meta?.exerciseHistory);
+  applyServerMeals(meta?.mealHistory);
+}
+
 let userId: string | null = null;
 
 export function startSync(): void {
@@ -280,7 +287,7 @@ export function startSync(): void {
     settingsEdits = 0;
     clearDays();
     /* The saved picks ride along with the session; signed out, the defaults. */
-    applyServerExercises(session?.user.user_metadata.exerciseHistory);
+    applyServerPicks(session?.user.user_metadata);
     setStatus({
       auth: uid ? 'signed-in' : 'signed-out',
       email: session?.user.email ?? null,
@@ -301,6 +308,7 @@ export function startSync(): void {
 
   onEdit(queueSave);
   onExercisesEdit(queueSettingsSave);
+  onMealsEdit(queueSettingsSave);
 
   const retry = () => {
     if (status.auth !== 'signed-in') return;

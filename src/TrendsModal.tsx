@@ -3,6 +3,7 @@ import { useCompact } from './useCompact';
 import Icon from './Icon';
 import { HalfFill } from './TriangleNodes';
 import { CATALOG, exercisesOn, useExerciseHistory } from './exercises';
+import { MEALS, mealsOn, useMealHistory } from './meals';
 import { NODES, type NodeSpec, type Slot } from './geometry';
 import {
   FIRST_DAY,
@@ -158,7 +159,8 @@ export default function TrendsModal({
   const exercise = NODES.find((n) => n.id === 'exercise')!;
   const meals = NODES.find((n) => n.id === 'meals')!;
   const sleep = NODES.find((n) => n.id === 'sleep')!;
-  const mealRows = meals.reveal.kind === 'fan' ? meals.reveal.slots.length : 5;
+  /* Sized for every meal, so marks keep their size whichever are picked. */
+  const mealRows = MEALS.length;
 
   const busiest = Math.max(1, ...days.map((d) => (d.future ? 0 : d.log.activities.length)));
   const R = sharedRadius(g, busiest, mealRows);
@@ -270,8 +272,8 @@ function Lane({
 }
 
 /**
- * One column per day on a line through the plot's middle, connected where
- * consecutive days were both exercised. A logged day with nothing is a hollow
+ * One column per day on a line through the plot's middle, connecting every
+ * day so far, exercised or not. A logged day with nothing is a hollow
  * disc; a day still to come is faint.
  *
  * Multiple activities stack vertically, centred on the spine. That keeps the
@@ -294,17 +296,8 @@ function ExerciseLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day
     done: day.future ? [] : slots.filter((s) => slotState(day.log.activities, s.id) !== 'empty'),
   }));
 
-  /* Runs break at missed days AND at days not yet reached. */
-  const segments: number[][] = [];
-  let run: number[] = [];
-  for (const m of marks) {
-    if (m.done.length) run.push(m.x);
-    else if (run.length) {
-      segments.push(run);
-      run = [];
-    }
-  }
-  if (run.length) segments.push(run);
+  /* One run through every day so far, missed ones included; it stops at days not yet reached. */
+  const spineXs = marks.filter((m) => !m.day.future).map((m) => m.x);
 
   const elapsed = days.filter((d) => !d.future).length;
   const count = marks.filter((m) => m.done.length).length;
@@ -318,9 +311,9 @@ function ExerciseLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day
       label={`on ${count} of ${elapsed} days so far, ${sessions} sessions`}
     >
       <HalfFill id="trend-half-exercise" color={node.color} />
-      {segments.map((seg) => (
-        <polyline key={seg[0]} className="line" points={seg.map((x) => `${x},${spine}`).join(' ')} />
-      ))}
+      {spineXs.length > 1 && (
+        <polyline className="line" points={spineXs.map((x) => `${x},${spine}`).join(' ')} />
+      )}
 
       {marks.map(({ day, x, done }) =>
         done.length === 0 ? (
@@ -359,21 +352,31 @@ function ExerciseLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day
   );
 }
 
-/** A punch card: one row per meal, one column per day, filling the plot. */
+/**
+ * A punch card: one row per meal, one column per day. Rows are every meal
+ * the week offered or logged, in catalog order, on the five-row pitch so
+ * marks line up with a full week. A day that didn't track a meal has no mark
+ * in that row: it wasn't missed, it wasn't asked.
+ */
 function MealsLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[]; r: number }) {
-  if (node.reveal.kind === 'dial') return null;
-  const slots = node.reveal.slots;
+  const history = useMealHistory();
+  const offered = days.map((d) => new Set(mealsOn(history, d.date, d.log.meals).map((m) => m.id)));
+  const slots = MEALS.filter((m) => offered.some((o) => o.has(m.id)));
 
-  /* Inset by r at both ends, so the outer rows sit fully inside the plot. */
+  /* Inset by r at both ends, so the outer rows of a full card sit fully
+     inside the plot; fewer rows keep that pitch, centred. */
   const top = TITLE_H + PAD_V + r;
   const bottom = TITLE_H + PLOT_H - PAD_V - r;
-  const rowY = (i: number) => top + (i * (bottom - top)) / (slots.length - 1);
+  const pitch = (bottom - top) / (MEALS.length - 1);
+  const rowY = (i: number) => (top + bottom) / 2 + (i - (slots.length - 1) / 2) * pitch;
 
   const elapsed = days.filter((d) => !d.future).length;
-  const complete = days.filter((d) => !d.future && d.log.meals.length === slots.length).length;
+  const complete = days.filter(
+    (d, c) => !d.future && [...offered[c]].every((id) => slotState(d.log.meals, id) !== 'empty'),
+  ).length;
 
   return (
-    <Lane g={g} title="Eating" color={node.color} label={`all five on ${complete} of ${elapsed} days so far`}>
+    <Lane g={g} title="Eating" color={node.color} label={`every meal on ${complete} of ${elapsed} days so far`}>
       <HalfFill id="trend-half-meals" color={node.color} />
       {slots.map((slot, i) => (
         <g key={slot.id}>
@@ -381,6 +384,7 @@ function MealsLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[];
             {slot.label}
           </text>
           {days.map((day, c) => {
+            if (!offered[c].has(slot.id)) return null;
             const meal = slotState(day.log.meals, slot.id);
             const state = day.future
               ? 'is-future'
@@ -411,9 +415,10 @@ function MealsLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[];
 }
 
 /**
- * Hours per night as a line with a point per logged night. The line is cut
- * into segments at unlogged nights rather than bridging them — joining across
- * a gap would draw a night that was never recorded.
+ * Hours per night as a line with a point per night so far. A night with no
+ * hours logged gets a grey placeholder halfway up the plot, joined to the
+ * line like any other, so the grey says "no data" without the line having
+ * to break. The line stops at days not yet reached.
  */
 function SleepLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[]; r: number }) {
   if (node.reveal.kind !== 'dial') return null;
@@ -426,9 +431,11 @@ function SleepLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[];
     bottom - ((Math.max(v, floor) - floor) / (dial.max - floor)) * (bottom - top);
 
   const points = days.map((d, i) =>
-    d.future || d.log.sleepHours === null
+    d.future
       ? null
-      : { x: g.colX(i), y: yFor(d.log.sleepHours), v: d.log.sleepHours, date: d.date },
+      : d.log.sleepHours !== null
+        ? { x: g.colX(i), y: yFor(d.log.sleepHours), v: d.log.sleepHours, date: d.date, pending: false }
+        : { x: g.colX(i), y: (top + bottom) / 2, v: 0, date: d.date, pending: true },
   );
 
   const segments: NonNullable<(typeof points)[number]>[][] = [];
@@ -442,7 +449,8 @@ function SleepLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[];
   }
   if (run.length) segments.push(run);
 
-  const logged = points.filter(Boolean) as NonNullable<(typeof points)[number]>[];
+  const plotted = points.filter(Boolean) as NonNullable<(typeof points)[number]>[];
+  const logged = plotted.filter((p) => !p.pending);
   const elapsed = days.filter((d) => !d.future).length;
   const mean = logged.length ? logged.reduce((a, p) => a + p.v, 0) / logged.length : null;
 
@@ -472,10 +480,10 @@ function SleepLane({ g, node, days, r }: { g: Grid; node: NodeSpec; days: Day[];
         <polyline key={seg[0].date} className="line" points={seg.map((p) => `${p.x},${p.y}`).join(' ')} />
       ))}
 
-      {logged.map((p) => (
+      {plotted.map((p) => (
         <g key={p.date}>
-          <title>{`${formatShortDay(p.date)}: ${p.v} hours`}</title>
-          <circle className="point" cx={p.x} cy={p.y} r={r} />
+          <title>{`${formatShortDay(p.date)}: ${p.pending ? 'not logged' : `${p.v} hours`}`}</title>
+          <circle className={`point${p.pending ? ' is-pending' : ''}`} cx={p.x} cy={p.y} r={r} />
         </g>
       ))}
     </Lane>

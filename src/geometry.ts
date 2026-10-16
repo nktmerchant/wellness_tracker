@@ -4,6 +4,7 @@
  * resolution-independent — tweak these and the whole figure follows.
  */
 import { CATALOG, DEFAULT_EXERCISES, MAX_EXERCISES, exerciseById } from './exercises';
+import { MEALS } from './meals';
 import type { IconName } from './icons';
 
 /**
@@ -226,13 +227,8 @@ export const NODES: NodeSpec[] = [
        */
       axisDeg: 180,
       spacingDeg: 30,
-      slots: [
-        { id: 'breakfast', label: 'Breakfast', icon: 'breakfast' },
-        { id: 'midMorning', label: 'Mid-morning', icon: 'midMorning' },
-        { id: 'lunch', label: 'Lunch', icon: 'lunch' },
-        { id: 'dinner', label: 'Dinner', icon: 'dinner' },
-        { id: 'supper', label: 'Supper', icon: 'supper' },
-      ],
+      /* All of them; nodesWith swaps in the person's own picks. */
+      slots: MEALS,
     },
   },
   {
@@ -293,10 +289,14 @@ function ringAngles(outward: number, n: number): number[] {
   return Array.from({ length: n }, (_, i) => outward - RING_STEP / 2 - i * RING_STEP);
 }
 
-/** The figure's nodes, with the exercise ring holding the person's picks. */
-export function nodesWith(exercises: Slot[]): NodeSpec[] {
+/** The figure's nodes, with the exercise ring and the meal fan holding the person's picks. */
+export function nodesWith(exercises: Slot[], meals: Slot[]): NodeSpec[] {
   return NODES.map((n) =>
-    n.reveal.kind === 'ring' ? { ...n, reveal: { ...n.reveal, slots: exercises } } : n,
+    n.reveal.kind === 'ring'
+      ? { ...n, reveal: { ...n.reveal, slots: exercises } }
+      : n.reveal.kind === 'fan'
+        ? { ...n, reveal: { ...n.reveal, slots: meals } }
+        : n,
   );
 }
 

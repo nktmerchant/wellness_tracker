@@ -47,6 +47,7 @@ import {
 } from './geometry';
 import Icon from './Icon';
 import { MAX_EXERCISES, exercisesOn, useExerciseHistory } from './exercises';
+import { mealsOn, useMealHistory } from './meals';
 import { formatDay, slotState, type DayLog, type SlotState } from './useDayLog';
 
 type Props = {
@@ -91,11 +92,16 @@ export default function TriangleNodes({
 }: Props) {
   /* The node opened by a tap. Mouse hover is tracked inside each node. */
   const [tapped, setTapped] = useState<NodeSpec['id'] | null>(null);
-  /* The ring is the shown day's own picks, so it changes as days are paged. */
+  /* The ring and the fan are the shown day's own picks, so they change as days are paged. */
   const history = useExerciseHistory();
+  const mealPicks = useMealHistory();
   const nodes = useMemo(
-    () => nodesWith(exercisesOn(history, date, log.activities).slice(0, MAX_EXERCISES)),
-    [history, date, log.activities],
+    () =>
+      nodesWith(
+        exercisesOn(history, date, log.activities).slice(0, MAX_EXERCISES),
+        mealsOn(mealPicks, date, log.meals),
+      ),
+    [history, mealPicks, date, log.activities, log.meals],
   );
 
   /* A tap outside every node closes the open one. The document is an
