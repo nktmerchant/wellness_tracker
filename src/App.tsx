@@ -1,5 +1,6 @@
 import { useState, useSyncExternalStore } from 'react';
 import SaveNotice, { AccountPill, LoadFailed, Loading, NotConfigured, SignIn } from './Account';
+import ShareButton from './ShareButton';
 import { getStatus, subscribeStatus } from './sync';
 import TriangleNodes from './TriangleNodes';
 import TrendsModal from './TrendsModal';
@@ -61,7 +62,11 @@ function Tracker() {
         onClose={() => setTrendsOpen(false)}
       />
       <AccountPill />
-      <SaveNotice />
+      {/* Stacked, so a save warning never lands on top of the share pill. */}
+      <div className="corner-right">
+        <ShareButton date={date} />
+        <SaveNotice />
+      </div>
     </main>
   );
 }

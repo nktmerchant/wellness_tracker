@@ -663,11 +663,36 @@ body {
 
 /* ---- account and sync ---- */
 
-/* Shown only while a save is failing; saving itself is silent. */
-.save-notice {
+/* Top-right corner: the share pill, with any save warning below it. */
+.corner-right {
   position: fixed;
   top: max(12px, env(safe-area-inset-top));
   right: max(12px, env(safe-area-inset-right));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* Quiet like the account pill opposite, until hovered or just used. */
+.share-pill {
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: inherit;
+  color: var(--unset);
+  background: var(--bg);
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 120ms var(--ease);
+}
+
+.share-pill:is(:hover, :focus-visible, .is-done) { color: var(--outline); }
+
+/* Shown only while a save is failing; saving itself is silent. */
+.save-notice {
   display: flex;
   align-items: center;
   gap: 8px;
